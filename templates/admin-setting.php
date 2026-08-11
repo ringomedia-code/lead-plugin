@@ -69,6 +69,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit'])) {
             $rd_referrals = array_map('sanitize_text_field', $_POST['repair_desk_referral']);
             update_option('repair_desk_referral', json_encode($rd_referrals)); // Save as JSON
         }
+        if (isset($_POST['ringoleads_referral']) && is_array($_POST['ringoleads_referral'])) {
+            $rl_referrals = array_map('sanitize_text_field', $_POST['ringoleads_referral']);
+            update_option('ringoleads_referral', json_encode($rl_referrals)); // Save as JSON
+        }
 
         echo '<div class="notice notice-success is-dismissible rmfl-saved-notice"><p>Settings saved.</p></div>';
     } else {
@@ -82,6 +86,8 @@ function my_plugin_register_settings() {
     register_setting('form_plugins_options_group', 'repair_desk_enabled');
     register_setting('form_plugins_options_group', 'ringoleads_enabled');
     register_setting('form_plugins_options_group', 'pbx_referral'); // Save dropdown selection
+    register_setting('form_plugins_options_group', 'repair_desk_referral');
+    register_setting('form_plugins_options_group', 'ringoleads_referral');
     register_setting('form_plugins_options_group', 'rmfl_locations');
     register_setting('form_plugins_options_group', 'error_api_email');
 }
@@ -97,6 +103,7 @@ if ($validation_error) {
     $error_api_email = sanitize_text_field($_POST['error_api_email'] ?? '');
     $saved_referrals = isset($_POST['pbx_referral']) && is_array($_POST['pbx_referral']) ? array_map('sanitize_text_field', $_POST['pbx_referral']) : [];
     $repairDesk_referral = isset($_POST['repair_desk_referral']) && is_array($_POST['repair_desk_referral']) ? array_map('sanitize_text_field', $_POST['repair_desk_referral']) : [];
+    $saved_ringoleads_referral = isset($_POST['ringoleads_referral']) && is_array($_POST['ringoleads_referral']) ? array_map('sanitize_text_field', $_POST['ringoleads_referral']) : [];
 } else {
     $pbx_enabled = get_option('pbx_enabled', '');
     $repair_desk_enabled = get_option('repair_desk_enabled', '');
@@ -104,6 +111,7 @@ if ($validation_error) {
     $error_api_email = get_option('error_api_email', '');
     $saved_referrals = json_decode(get_option('pbx_referral'), true) ?? [];
     $repairDesk_referral = json_decode(get_option('repair_desk_referral'), true) ?? [];
+    $saved_ringoleads_referral = json_decode(get_option('ringoleads_referral'), true) ?? [];
 
     // Retrieve saved locations, migrating from the old single/dual API key options if this is the first load
     $locations = json_decode(get_option('rmfl_locations', ''), true);
@@ -126,6 +134,33 @@ function render_referral_dropdown($selected_value = '') {
     $dropdown .= '<option value="">Select a referral…</option>';
     foreach ($referral_options as $value) {        
         $dropdown .= '<option value="' . $value['val'] . '" ' . selected($selected_value, $value['val'], false) . '>' . $value['text'] . '</option>';    
+    }
+    $dropdown .= '</select>';
+    return $dropdown;
+}
+
+function rmfl_ringoleads_sources() {
+    return [
+        'facebook'     => 'Facebook',
+        'facebook_ads' => 'Facebook Ads',
+        'google_maps'  => 'Google Maps',
+        'website'      => 'Website',
+        'google'       => 'Google',
+        'instagram'    => 'Instagram',
+        'google_ads'   => 'Google Ads',
+        'organic'      => 'Organic',
+        'calendly'     => 'Calendly',
+        'sms'          => 'SMS',
+        'ai'           => 'AI',
+        'zapier'       => 'Zapier',
+    ];
+}
+
+function render_ringoleads_referral_dropdown($selected_value = '') {
+    $dropdown = '<select name="ringoleads_referral[]" class="ringoleadsReferralDropdown">';
+    $dropdown .= '<option value="">Select a source…</option>';
+    foreach (rmfl_ringoleads_sources() as $slug => $label) {
+        $dropdown .= '<option value="' . esc_attr($slug) . '" ' . selected($selected_value, $slug, false) . '>' . esc_html($label) . '</option>';
     }
     $dropdown .= '</select>';
     return $dropdown;
@@ -495,30 +530,32 @@ function render_location_block($index, $pbx_value = '', $rd_value = '', $rl_valu
             <div class="rmfl-referral-hint">
                 Location 1 has no numeric suffix. Location 2 adds <code>_2</code>, Location 3 adds <code>_3</code>, and so on. Example: <code>rl_form_request_google_ads</code> for Location 1 or <code>rl_form_request_google_ads_2</code> for Location 2.
             </div>
-            <div class="rmfl-ringoleads-sources" style="margin-top:14px;">
+            <div id="ringoleadsDropdownContainer">
                 <?php
-                $ringoleads_sources = [
-                    'facebook'     => 'Facebook',
-                    'facebook_ads' => 'Facebook Ads',
-                    'google_maps'  => 'Google Maps',
-                    'website'      => 'Website',
-                    'google'       => 'Google',
-                    'instagram'    => 'Instagram',
-                    'google_ads'   => 'Google Ads',
-                    'organic'      => 'Organic',
-                    'calendly'     => 'Calendly',
-                    'sms'          => 'SMS',
-                    'ai'           => 'AI',
-                    'zapier'       => 'Zapier',
-                ];
-                foreach ($ringoleads_sources as $slug => $label) {
-                    echo '<div class="rmfl-referral-hint" style="margin-bottom:8px;">'
-                        . '<strong>' . esc_html($label) . '</strong>: '
-                        . '<span class="ringoleads-source-class-display" data-source="' . esc_attr($slug) . '"></span>'
-                        . '</div>';
+                if (!empty($saved_ringoleads_referral)) {
+                    foreach ($saved_ringoleads_referral as $referral) {
+                        $sanitized_referral = sanitize_text_field($referral);
+                        echo '<div class="referral-container">'
+                        . render_ringoleads_referral_dropdown($sanitized_referral) .
+                        '<button type="button" class="remove-btn" title="Remove">×</button>
+                         <span class="ringoleads-source-class-display"></span>
+                     </div>';
+                    }
+                } else {
+                    // Default dropdown if no values are saved
+                    echo '<div class="referral-container">'
+                    . render_ringoleads_referral_dropdown('') .
+                    '<button type="button" class="remove-btn" title="Remove">×</button>
+                     <span class="ringoleads-source-class-display"></span>
+                 </div>';
                 }
                 ?>
             </div>
+            <button type="button" class="ringoleads-add-btn button">+ Add referral</button>
+
+            <!-- Hidden template used by JS to add new RingoLeads referral rows -->
+            <script type="text/template" id="ringoleads-referral-template"><div class="referral-container"><?php echo render_ringoleads_referral_dropdown(''); ?><button type="button" class="remove-btn" title="Remove">×</button><span class="ringoleads-source-class-display"></span></div></script>
+
             <p class="rmfl-card-subtitle" style="margin-top:12px;">The current page URL is sent separately as <code>source_url</code>. Custom form fields still pass through to RingoLeads as qualifying answers.</p>
         </div>
 
@@ -591,9 +628,9 @@ jQuery(document).ready(function ($) {
             const source = ($(this).val() || '').toLowerCase().replace(/\s+/g, '_');
             $(this).siblings('.repair-desk-class-display').html(buildClassHint('rd_form_request', source));
         });
-        $('.ringoleads-source-class-display').each(function () {
-            const source = $(this).data('source') || '';
-            $(this).html(buildRingoLeadsClassHint(source));
+        $('.ringoleadsReferralDropdown').each(function () {
+            const source = $(this).val() || '';
+            $(this).siblings('.ringoleads-source-class-display').html(buildRingoLeadsClassHint(source));
         });
     }
 
@@ -631,6 +668,18 @@ jQuery(document).ready(function ($) {
     $(document).on('change', '.referralDropdown', function () {
         const source = ($(this).val() || '').toLowerCase().replace(/\s+/g, '_');
         $(this).siblings('.class-display').html(buildClassHint('form_submit_request', source));
+    });
+
+    ////////////////////// for ringoleads
+
+    $('.ringoleads-add-btn').on('click', function () {
+        const template = $('#ringoleads-referral-template').html();
+        $('#ringoleadsDropdownContainer').append(template);
+    });
+
+    $(document).on('change', '.ringoleadsReferralDropdown', function () {
+        const source = $(this).val() || '';
+        $(this).siblings('.ringoleads-source-class-display').html(buildRingoLeadsClassHint(source));
     });
 
     ////////////////////// for repair desk
