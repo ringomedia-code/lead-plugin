@@ -67,6 +67,7 @@ final class RMFL
         // Retrieve settings from the database
         $pbx_enabled = get_option('pbx_enabled', '');
         $repair_desk_enabled = get_option('repair_desk_enabled', '');
+        $ringoleads_enabled = get_option('ringoleads_enabled', '');
 
         // Sanitize and validate input data
         $name = isset($_POST['name']) ? sanitize_text_field($_POST['name']) : '';
@@ -76,6 +77,29 @@ final class RMFL
         $formNumber = isset($_POST['formNumber']) ? sanitize_text_field($_POST['formNumber']) : '';
         $apiName = isset($_POST['api']) ? sanitize_text_field($_POST['api']) : '';
         $formClassType = isset($_POST['formClassType']) ? sanitize_text_field($_POST['formClassType']) : '';
+        $source_url = isset($_POST['source_url']) ? esc_url_raw(wp_unslash($_POST['source_url'])) : '';
+        $source = isset($_POST['source']) ? sanitize_text_field(wp_unslash($_POST['source'])) : 'wordpress';
+
+        // Keep the original lead message safe. PBX/Repair Desk blocks below reuse the
+        // $message variable to hold their own status text, so anything running after them
+        // (RingoLeads) needs its own untouched copy of what the visitor actually typed.
+        $lead_message = $message;
+
+        // Any custom form fields the site sent along (e.g. "service", "timeframe") for
+        // pass-through to RingoLeads, which stores unrecognised fields verbatim.
+        $extra_fields = [];
+        if (isset($_POST['extra_fields'])) {
+            $decoded_extra = json_decode(wp_unslash($_POST['extra_fields']), true);
+            if (is_array($decoded_extra)) {
+                foreach ($decoded_extra as $extra_key => $extra_value) {
+                    $clean_key = sanitize_key($extra_key);
+                    if ($clean_key === '' || !is_scalar($extra_value)) {
+                        continue;
+                    }
+                    $extra_fields[$clean_key] = sanitize_text_field($extra_value);
+                }
+            }
+        }
 
         // Check for required fields
         if (!$name || !$email || !$message) {
@@ -91,11 +115,12 @@ final class RMFL
 
         $locations = json_decode(get_option('rmfl_locations', ''), true);
         if (!is_array($locations) || empty($locations)) {
-            $locations = [['pbx' => get_option('pbx_api_key', ''), 'rd' => get_option('repair_desk_api_key', '')]];
+            $locations = [['pbx' => get_option('pbx_api_key', ''), 'rd' => get_option('repair_desk_api_key', ''), 'rl' => '']];
         }
-        $location = $locations[$location_index - 1] ?? $locations[0] ?? ['pbx' => '', 'rd' => ''];
+        $location = $locations[$location_index - 1] ?? $locations[0] ?? ['pbx' => '', 'rd' => '', 'rl' => ''];
         $current_pbx_key = $location['pbx'] ?? '';
         $current_rd_key = $location['rd'] ?? '';
+        $current_rl_key = $location['rl'] ?? '';
 
         // Handle PBX API request
         if ($pbx_enabled && $apiName === 'PBX') {
@@ -168,6 +193,49 @@ final class RMFL
             }
             $response_body = is_wp_error($response) ? $response->get_error_message() : wp_remote_retrieve_body($response);
             $this->save_api_response('Repair Desk', $status, $name, $phone, $email, $message, $response_body);
+        }
+
+        // Handle RingoLeads inbound lead API request
+        if ($ringoleads_enabled && $apiName === 'RingoLeads') {
+            $ringoleads_url = 'https://app.ringoleads.com/api/inbound/lead';
+            $ringoleads_data = [
+                'name'       => $name,
+                'phone'      => $phone,
+                'email'      => $email,
+                'message'    => $lead_message,
+                'source_url' => $source_url,
+                'source'     => $source ?: 'wordpress',
+            ];
+            // Any custom form fields pass straight through as their own top-level keys,
+            // without overwriting the fields already set above.
+            foreach ($extra_fields as $extra_key => $extra_value) {
+                if (!isset($ringoleads_data[$extra_key])) {
+                    $ringoleads_data[$extra_key] = $extra_value;
+                }
+            }
+
+            $response = wp_remote_post($ringoleads_url, [
+                'headers' => [
+                    'Authorization' => 'Bearer ' . $current_rl_key,
+                    'Content-Type'  => 'application/json',
+                ],
+                'body' => wp_json_encode($ringoleads_data),
+                'method' => 'POST',
+                'timeout' => 30,
+            ]);
+
+            // Handle RingoLeads API response
+            if (is_wp_error($response)) {
+                $status = 'error';
+                $message = $response->get_error_message();
+            } else {
+                $response_code = wp_remote_retrieve_response_code($response);
+                $body = json_decode(wp_remote_retrieve_body($response), true);
+                $status = ($response_code === 200 && !empty($body['ok'])) ? 'success' : 'error';
+                $message = $status === 'success' ? 'Lead delivered.' : ($body['error'] ?? 'Unknown error');
+            }
+            $response_body = is_wp_error($response) ? $response->get_error_message() : wp_remote_retrieve_body($response);
+            $this->save_api_response('RingoLeads', $status, $name, $phone, $email, $message, $response_body);
         }
 
         // Send final response to the client

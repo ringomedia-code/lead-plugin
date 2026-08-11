@@ -1,30 +1,95 @@
 jQuery(document).ready(function ($) {
+    // RingoLeads uses one CSS class for both source and location.
+    // Location 1: rl_form_request_google_ads | Location 2: rl_form_request_google_ads_2 | etc.
+    // RingoLeads expects the canonical lowercase source slugs below.
+    // The CRM maps each slug to its display label (for example, google_ads -> Google Ads).
+    const ringoLeadsSources = {
+        'facebook': 'facebook',
+        'facebook_ads': 'facebook_ads',
+        'google_maps': 'google_maps',
+        'website': 'website',
+        'google': 'google',
+        'instagram': 'instagram',
+        'google_ads': 'google_ads',
+        'organic': 'organic',
+        'calendly': 'calendly',
+        'sms': 'sms',
+        'ai': 'ai',
+        'zapier': 'zapier'
+    };
+
+    function findRingoLeadsRoute($form) {
+        let route = null;
+        $form.add($form.parents()).each(function () {
+            if (route) return false;
+            const className = typeof this.className === 'string' ? this.className : '';
+            const classes = className.split(/\s+/).filter(Boolean);
+            for (const classToken of classes) {
+                // Backward compatibility with the old generic RingoLeads classes.
+                const legacyMatch = classToken.match(/^rl_form_request(?:_(\d+))?$/);
+                if (legacyMatch) {
+                    route = {
+                        classToken,
+                        location: legacyMatch[1] ? parseInt(legacyMatch[1], 10) : 1,
+                        source: 'wordpress',
+                        legacy: true
+                    };
+                    return false;
+                }
+
+                const match = classToken.match(/^rl_form_request_([a-z0-9_]+?)(?:_(\d+))?$/);
+                if (!match) continue;
+
+                const sourceSlug = match[1];
+                if (!Object.prototype.hasOwnProperty.call(ringoLeadsSources, sourceSlug)) continue;
+
+                route = {
+                    classToken,
+                    location: match[2] ? parseInt(match[2], 10) : 1,
+                    source: ringoLeadsSources[sourceSlug],
+                    legacy: false
+                };
+                return false;
+            }
+        });
+        return route;
+    }
     // Function to handle form submissions
-    function handleFormSubmission(e, formType) {
+    function handleFormSubmission(e, formType, routeInfo = null) {
         e.preventDefault(); // Prevent default form submission
 
-        // Base class prefix for this form type; the actual class on the form/container
-        // may carry a trailing location number, e.g. 'form_submit_request_3-...'
-        const basePrefix = formType === 'rd' ? 'rd_form_request' : 'form_submit_request';
-        const apiName = formType === 'rd' ? 'RepairDesk' : 'PBX';
+        // Base class prefix for PBX / RepairDesk. RingoLeads routing is handled
+        // separately because one class now carries BOTH source and location.
+        const basePrefix = formType === 'rd' ? 'rd_form_request' : formType === 'rl' ? 'rl' : 'form_submit_request';
+        const apiName = formType === 'rd' ? 'RepairDesk' : formType === 'rl' ? 'RingoLeads' : 'PBX';
 
-        // Get the closest element carrying a class that starts with the base prefix
-        const container = $(this).closest(`[class*='${basePrefix}']`);
-        const formClass = container.attr("class") || '';
+        let formClassType = basePrefix;
+        let formIdentifier = formType === 'rd' ? 'Ringo Media' : formType === 'rl' ? '' : '26';
 
-        // Work out the exact prefix used (with or without a location number) and the
-        // form class type to send to the backend, e.g. 'form_submit_request' or 'form_submit_request_3'
-        const prefixMatch = formClass.match(new RegExp(`${basePrefix}(_\\d+)?-`));
-        const classPrefix = prefixMatch ? prefixMatch[0] : `${basePrefix}-`;
-        const formClassType = prefixMatch ? prefixMatch[0].slice(0, -1) : basePrefix;
+        if (formType === 'rl') {
+            routeInfo = routeInfo || findRingoLeadsRoute($(this));
+            if (!routeInfo) return;
+            formClassType = routeInfo.location > 1 ? `rl_source_${routeInfo.location}` : 'rl_source';
+            formIdentifier = routeInfo.source;
+        } else {
+            // Get the closest element carrying a class that starts with the base prefix
+            const container = $(this).closest(`[class*='${basePrefix}']`);
+            const formClass = container.attr("class") || '';
 
-        // Extract the form identifier (number or text) using regex
-        const match = formClass.match(new RegExp(`${classPrefix}([\\w_]+)`));
-        let formIdentifier = match ? match[1] : formType === 'rd' ? 'Ringo Media' : '26';
+            // Work out the exact prefix used (with or without a location number) and the
+            // form class type to send to the backend, e.g. 'form_submit_request' or 'form_submit_request_3'
+            const prefixMatch = formClass.match(new RegExp(`${basePrefix}(_\\d+)?-`));
+            const classPrefix = prefixMatch ? prefixMatch[0] : `${basePrefix}-`;
+            formClassType = prefixMatch ? prefixMatch[0].slice(0, -1) : basePrefix;
 
-        // Format the form identifier for RepairDesk forms
-        if (formType === 'rd') {
-            formIdentifier = formatText(formIdentifier);
+            // Extract the form identifier (number or text) using regex
+            const match = formClass.match(new RegExp(`${classPrefix}([\\w_]+)`));
+            formIdentifier = match ? match[1] : formType === 'rd' ? 'Ringo Media' : '26';
+
+            // Format the form identifier for RepairDesk forms
+            if (formType === 'rd') {
+                formIdentifier = formatText(formIdentifier);
+            }
         }
 
         // Log which form class was triggered (for debugging)
@@ -99,32 +164,55 @@ jQuery(document).ready(function ($) {
 
         const { name, email, phone, message } = extractedFields;
 
-        // Handle additional fields
+        // Pulls the plain field name out of a "form_fields[service]" style key,
+        // e.g. "form_fields[service]" -> "service".
+        const extractFieldKey = (key) => {
+            const match = key.match(/^[^\[]*\[(.+)\]$/);
+            return match ? match[1] : key;
+        };
+
+        // Handle additional (custom) fields. RingoLeads stores unrecognised fields
+        // verbatim, so those get sent through as their own keys instead of being
+        // folded into the message text like PBX and Repair Desk expect.
         let additionalMessage = '';
+        const extraFields = {};
         for (const key in formData) {
             if (!specificKeys[key]) { // If the key is not in the specificKeys map
-                const formattedKey = formatKey(key); // Format the key
-                additionalMessage += `\n${formattedKey}: ${formData[key]}`;
+                if (formType === 'rl') {
+                    const fieldKey = extractFieldKey(key);
+                    if (fieldKey) extraFields[fieldKey] = formData[key];
+                } else {
+                    const formattedKey = formatKey(key); // Format the key
+                    additionalMessage += `\n${formattedKey}: ${formData[key]}`;
+                }
             }
         }
 
-        // Combine the main message and additional fields
-        const finalMessage = message + additionalMessage;    
+        // Combine the main message and additional fields (PBX / Repair Desk only)
+        const finalMessage = formType === 'rl' ? message : message + additionalMessage;
+
+        const ajaxData = {
+            action: 'send_form_data_to_api',
+            name: name,
+            email: email,
+            phone: phone,
+            message: finalMessage,
+            formNumber: formIdentifier,
+            api: apiName,
+            formClassType: formClassType // Pass the form class type (location) to the backend
+        };
+
+        if (formType === 'rl') {
+            ajaxData.source_url = window.location.href;
+            ajaxData.source = routeInfo ? routeInfo.source : 'wordpress';
+            ajaxData.extra_fields = JSON.stringify(extraFields);
+        }
 
         // Send data via AJAX
         $.ajax({
             url: ajaxurl, // WordPress AJAX URL
             type: 'POST',
-            data: {
-                action: 'send_form_data_to_api',
-                name: name,
-                email: email,
-                phone: phone,
-                message: finalMessage,
-                formNumber: formIdentifier,
-                api: apiName,
-                formClassType: formClassType // Pass the form class type (location) to the backend
-            },
+            data: ajaxData,
             success: function (response) {
                 console.log('Data sent successfully:', response);
                 if (!response.success) {
@@ -153,6 +241,15 @@ jQuery(document).ready(function ($) {
 
     $(document).on('submit', "div[class*='rd_form_request'] form, form[class*='rd_form_request']", function (e) {
         handleFormSubmission.call(this, e, 'rd');
+    });
+
+    // RingoLeads: one class determines both source and location.
+    // Examples: rl_form_request_website, rl_form_request_google_ads, rl_form_request_google_ads_2, rl_form_request_facebook_3.
+    // We listen on all forms, but only intercept forms with a recognized RingoLeads class.
+    $(document).on('submit', 'form', function (e) {
+        const routeInfo = findRingoLeadsRoute($(this));
+        if (!routeInfo) return;
+        handleFormSubmission.call(this, e, 'rl', routeInfo);
     });
 
     $(document).on('input', "#form-field-phone", function (e) {
