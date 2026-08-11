@@ -2,8 +2,8 @@
 
 Collects form submissions from your WordPress site and routes them to **PBX**, **Repair Desk**, and/or **RingoLeads**, with support for any number of business locations, each using its own API keys and referral sources.
 
-Current version: **1.6.1**
-Repository: https://github.com/ammar458/lead-plugin
+Current version: **1.6.3**
+Repository: https://github.com/ringomedia-code/lead-plugin
 
 ## Features
 
@@ -17,7 +17,7 @@ Repository: https://github.com/ammar458/lead-plugin
 
 ## Installation
 
-1. Download the latest release zip from the [Releases page](https://github.com/ammar458/lead-plugin/releases/latest) (or from a teammate).
+1. Download the latest release zip from the [Releases page](https://github.com/ringomedia-code/lead-plugin/releases/latest) (or from a teammate).
 2. In wp-admin, go to **Plugins → Add New → Upload Plugin**, choose the zip, and click **Install Now**.
 3. Click **Activate**.
 4. Go to the new **RM Form Leads** menu item in the wp-admin sidebar to configure it.
