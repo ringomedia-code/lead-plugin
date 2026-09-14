@@ -216,12 +216,11 @@ jQuery(document).ready(function ($) {
             success: function (response) {
                 console.log('Data sent successfully:', response);
                 if (!response.success) {
-                    alert('Error: ' + response.data.message); // Show error message
+                    console.error('API submission failed:', response.data && response.data.message);
                 }
             },
             error: function (error) {
                 console.error('Error sending data:', error);
-                // alert('Failed to send data. Please try again.'); // Show error message
             },
         });
     }

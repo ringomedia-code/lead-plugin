@@ -10,7 +10,7 @@
 Plugin Name: RM Form Leads
 Plugin URI: 
 Description: Collect and manage form leads effortlessly, with support for routing leads from any number of business locations.
-Version: 1.6.4
+Version: 1.6.5
 Author: Ringo Media
 Author URI: https://ringomedia.com
 License: GPLv2 or later
