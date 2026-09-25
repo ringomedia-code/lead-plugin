@@ -20,6 +20,16 @@ class Updater {
         );
 
         $update_checker->getVcsApi()->enableReleaseAssets();
+
+        // Force WordPress's own auto-update cycle (wp_maybe_auto_update(), roughly twice
+        // a day) to update this plugin on every site without an admin needing to opt in
+        // via the Plugins screen or click "Update Now" first.
+        add_filter('auto_update_plugin', function ($should_update, $item) {
+            if (isset($item->plugin) && $item->plugin === plugin_basename(RMFL_WP)) {
+                return true;
+            }
+            return $should_update;
+        }, 10, 2);
     }
 }
 
