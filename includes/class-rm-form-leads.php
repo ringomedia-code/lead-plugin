@@ -101,8 +101,15 @@ final class RMFL
             }
         }
 
-        // Check for required fields
-        if (!$name || !$email || !$message) {
+        // Require a name plus at least one way to reach back (phone or email); message
+        // is optional. sanitize_email() silently empties an invalid address, so log the
+        // raw value here rather than dropping the lead with no trace.
+        if (!$name || (!$email && !$phone)) {
+            $raw_email = isset($_POST['email']) ? sanitize_text_field(wp_unslash($_POST['email'])) : '';
+            $this->save_api_response(
+                $apiName ?: 'Validation', 'error', $name, $phone, $raw_email, $lead_message,
+                'Rejected by the plugin: a name and a phone or email are required.'
+            );
             wp_send_json_error(['message' => 'Required fields are missing.']);
         }
 
