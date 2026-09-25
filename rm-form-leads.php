@@ -26,7 +26,12 @@ if (!defined('RMFL_PLUGIN_TEMP')) define('RMFL_PLUGIN_TEMP', RMFL_PLUGIN_PATH . 
 define('RMFL_PLUGIN_VERSION', '1.7.0');
 // Ringo One's lead API (same contract as RingoLeads). Overridable with the
 // `ringoone_url` option or the `rmfl_ringoone_url` filter.
-if (!defined('RMFL_RINGOONE_URL')) define('RMFL_RINGOONE_URL', 'https://app.ringomedia.com/api/inbound/lead');
+// TEMPORARY: app.ringomedia.com/api/inbound/lead is not live yet (see review doc
+// item #14), so this points at the working RingoLeads endpoint as a stand-in until
+// the real Ringo One endpoint ships. Swap this back once it does. Do not enable
+// Ringo One and RingoLeads together on the same site while this is in place, or
+// every lead will be submitted twice to RingoLeads.
+if (!defined('RMFL_RINGOONE_URL')) define('RMFL_RINGOONE_URL', 'https://app.ringoleads.com/api/inbound/lead');
 
 require_once(RMFL_PLUGIN_INC . 'updater.php');
 if (!class_exists('RMFL')) {
