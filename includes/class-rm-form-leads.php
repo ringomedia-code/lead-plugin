@@ -68,6 +68,7 @@ final class RMFL
         $pbx_enabled = get_option('pbx_enabled', '');
         $repair_desk_enabled = get_option('repair_desk_enabled', '');
         $ringoleads_enabled = get_option('ringoleads_enabled', '');
+        $ringoone_enabled = get_option('ringoone_enabled', '');
 
         // Sanitize and validate input data
         $name = isset($_POST['name']) ? sanitize_text_field($_POST['name']) : '';
@@ -236,6 +237,54 @@ final class RMFL
             }
             $response_body = is_wp_error($response) ? $response->get_error_message() : wp_remote_retrieve_body($response);
             $this->save_api_response('RingoLeads', $status, $name, $phone, $email, $message, $response_body);
+        }
+
+        // Handle Ringo One lead API request (additive, off unless "Enable Ringo One" is ticked).
+        // Same forms (the rl_ classes), same per-location key and the same payload as the
+        // RingoLeads block above, sent to Ringo One's compatible /api/inbound/lead. The
+        // RingoLeads, PBX and Repair Desk deliveries are untouched.
+        if ($ringoone_enabled && $apiName === 'RingoLeads') {
+            $prior_status = isset($status) ? $status : null;
+            $ringoone_url = apply_filters('rmfl_ringoone_url', get_option('ringoone_url', '') ?: RMFL_RINGOONE_URL);
+            $ringoone_data = [
+                'name'       => $name,
+                'phone'      => $phone,
+                'email'      => $email,
+                'message'    => $lead_message,
+                'source_url' => $source_url,
+                'source'     => $source ?: 'wordpress',
+            ];
+            foreach ($extra_fields as $extra_key => $extra_value) {
+                if (!isset($ringoone_data[$extra_key])) {
+                    $ringoone_data[$extra_key] = $extra_value;
+                }
+            }
+
+            $response = wp_remote_post($ringoone_url, [
+                'headers' => [
+                    'Authorization' => 'Bearer ' . $current_rl_key,
+                    'Content-Type'  => 'application/json',
+                ],
+                'body' => wp_json_encode($ringoone_data),
+                'method' => 'POST',
+                'timeout' => 30,
+            ]);
+
+            if (is_wp_error($response)) {
+                $ringoone_status = 'error';
+                $ringoone_message = $response->get_error_message();
+            } else {
+                $response_code = wp_remote_retrieve_response_code($response);
+                $body = json_decode(wp_remote_retrieve_body($response), true);
+                $ringoone_status = ($response_code === 200 && !empty($body['ok'])) ? 'success' : 'error';
+                $ringoone_message = $ringoone_status === 'success' ? 'Lead delivered.' : ($body['error'] ?? 'Unknown error');
+            }
+            $response_body = is_wp_error($response) ? $response->get_error_message() : wp_remote_retrieve_body($response);
+            $this->save_api_response('Ringo One', $ringoone_status, $name, $phone, $email, $ringoone_message, $response_body);
+
+            // The visitor sees success if ANY delivery for this form succeeded, so turning
+            // Ringo One on can never make a form that works today start showing a failure.
+            $status = ($prior_status === 'success' || $ringoone_status === 'success') ? 'success' : 'error';
         }
 
         // Send final response to the client

@@ -58,6 +58,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit'])) {
         update_option('pbx_enabled', isset($_POST['pbx_enabled']) ? '1' : '');
         update_option('repair_desk_enabled', isset($_POST['repair_desk_enabled']) ? '1' : '');
         update_option('ringoleads_enabled', isset($_POST['ringoleads_enabled']) ? '1' : '');
+        update_option('ringoone_enabled', isset($_POST['ringoone_enabled']) ? '1' : '');
         update_option('error_api_email', sanitize_text_field($_POST['error_api_email'] ?? ''));
         update_option('rmfl_locations', wp_json_encode($locations_to_save));
 
@@ -85,6 +86,7 @@ function my_plugin_register_settings() {
     register_setting('form_plugins_options_group', 'pbx_enabled');
     register_setting('form_plugins_options_group', 'repair_desk_enabled');
     register_setting('form_plugins_options_group', 'ringoleads_enabled');
+    register_setting('form_plugins_options_group', 'ringoone_enabled');
     register_setting('form_plugins_options_group', 'pbx_referral'); // Save dropdown selection
     register_setting('form_plugins_options_group', 'repair_desk_referral');
     register_setting('form_plugins_options_group', 'ringoleads_referral');
@@ -100,6 +102,7 @@ if ($validation_error) {
     $pbx_enabled = isset($_POST['pbx_enabled']) ? '1' : '';
     $repair_desk_enabled = isset($_POST['repair_desk_enabled']) ? '1' : '';
     $ringoleads_enabled = isset($_POST['ringoleads_enabled']) ? '1' : '';
+    $ringoone_enabled = isset($_POST['ringoone_enabled']) ? '1' : '';
     $error_api_email = sanitize_text_field($_POST['error_api_email'] ?? '');
     $saved_referrals = isset($_POST['pbx_referral']) && is_array($_POST['pbx_referral']) ? array_map('sanitize_text_field', $_POST['pbx_referral']) : [];
     $repairDesk_referral = isset($_POST['repair_desk_referral']) && is_array($_POST['repair_desk_referral']) ? array_map('sanitize_text_field', $_POST['repair_desk_referral']) : [];
@@ -108,6 +111,7 @@ if ($validation_error) {
     $pbx_enabled = get_option('pbx_enabled', '');
     $repair_desk_enabled = get_option('repair_desk_enabled', '');
     $ringoleads_enabled = get_option('ringoleads_enabled', '');
+    $ringoone_enabled = get_option('ringoone_enabled', '');
     $error_api_email = get_option('error_api_email', '');
     $saved_referrals = json_decode(get_option('pbx_referral'), true) ?? [];
     $repairDesk_referral = json_decode(get_option('repair_desk_referral'), true) ?? [];
@@ -444,6 +448,11 @@ function render_location_block($index, $pbx_value = '', $rd_value = '', $rl_valu
                     <input type="checkbox" name="ringoleads_enabled" id="ringoleads_enabled" value="1" <?php checked($ringoleads_enabled, '1'); ?> />
                     <span class="rmfl-toggle-slider"></span>
                     <span>Enable RingoLeads</span>
+                </label>
+                <label class="rmfl-toggle" title="Sends the RingoLeads forms (rl_ classes) to Ringo One too, using each location's RingoLeads API key.">
+                    <input type="checkbox" name="ringoone_enabled" id="ringoone_enabled" value="1" <?php checked($ringoone_enabled, '1'); ?> />
+                    <span class="rmfl-toggle-slider"></span>
+                    <span>Enable Ringo One</span>
                 </label>
             </div>
         </div>
