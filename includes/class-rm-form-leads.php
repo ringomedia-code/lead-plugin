@@ -257,8 +257,11 @@ final class RMFL
 
         // Handle Ringo One lead API request (additive, off unless "Enable Ringo One" is ticked).
         // Same forms (the rl_ classes), same per-location key and the same payload as the
-        // RingoLeads block above, sent to Ringo One's compatible /api/inbound/lead. The
-        // RingoLeads, PBX and Repair Desk deliveries are untouched.
+        // RingoLeads block above, and in fact the SAME address (RMFL_RINGOONE_URL is
+        // RingoLeads' own endpoint; Ringo One's lead intake is that address). Do not enable
+        // Ringo One alongside RingoLeads on the same site: every lead would be submitted
+        // twice to the identical endpoint with the identical key. PBX and Repair Desk
+        // deliveries are untouched.
         if ($ringoone_enabled && $apiName === 'RingoLeads') {
             $prior_status = isset($status) ? $status : null;
             $ringoone_url = apply_filters('rmfl_ringoone_url', get_option('ringoone_url', '') ?: RMFL_RINGOONE_URL);
