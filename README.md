@@ -98,3 +98,12 @@ No manual tagging or zip-building needed — just bump the version and push.
 ## RingoLeads source slugs (v1.6.3)
 
 RingoLeads source CSS classes now send canonical lowercase CRM slugs, e.g. `rl_form_request_website` sends `source: website` and `rl_form_request_google_ads_2` sends `source: google_ads` using Location 2's API key.
+
+## Ringo One delivery (v1.7.0)
+
+Ringo One is replacing RingoLeads as the CRM. **Enable Ringo One** (Integrations) sends the same RingoLeads forms (`rl_` classes), with the same payload and each location's same RingoLeads API key, to Ringo One's lead API. It is **off by default**, so updating the plugin changes nothing until it is ticked. PBX, Repair Desk and RingoLeads deliveries are unchanged.
+
+- Each RingoLeads key must first be imported into Ringo One (the key becomes a lead source on that client's account), or Ringo One answers 401.
+- With both RingoLeads and Ringo One on, the visitor sees success if either delivery succeeds. Every attempt shows in **API History** as its own row ("Ringo One").
+- Once RingoLeads is retired, untick **Enable RingoLeads**, otherwise every lead also triggers a failure email for the RingoLeads attempt.
+- The endpoint defaults to `RMFL_RINGOONE_URL`; override it with the `ringoone_url` option or the `rmfl_ringoone_url` filter.
