@@ -125,10 +125,14 @@ final class RMFL
         if (!is_array($locations) || empty($locations)) {
             $locations = [['pbx' => get_option('pbx_api_key', ''), 'rd' => get_option('repair_desk_api_key', ''), 'rl' => '']];
         }
-        $location = $locations[$location_index - 1] ?? $locations[0] ?? ['pbx' => '', 'rd' => '', 'rl' => ''];
+        $location = $locations[$location_index - 1] ?? $locations[0] ?? ['pbx' => '', 'rd' => '', 'rl' => '', 'ringoone' => ''];
         $current_pbx_key = $location['pbx'] ?? '';
         $current_rd_key = $location['rd'] ?? '';
         $current_rl_key = $location['rl'] ?? '';
+        // Ringo One has its own optional key per location; falls back to the RingoLeads
+        // key above for sites that haven't set a distinct one (they were already working
+        // via the shared key before this field existed).
+        $current_ringoone_key = ($location['ringoone'] ?? '') ?: $current_rl_key;
 
         // Handle PBX API request
         if ($pbx_enabled && $apiName === 'PBX') {
@@ -256,12 +260,13 @@ final class RMFL
         }
 
         // Handle Ringo One lead API request (additive, off unless "Enable Ringo One" is ticked).
-        // Same forms (the rl_ classes), same per-location key and the same payload as the
-        // RingoLeads block above, and in fact the SAME address (RMFL_RINGOONE_URL is
-        // RingoLeads' own endpoint; Ringo One's lead intake is that address). Do not enable
-        // Ringo One alongside RingoLeads on the same site: every lead would be submitted
-        // twice to the identical endpoint with the identical key. PBX and Repair Desk
-        // deliveries are untouched.
+        // Same forms (the rl_ classes) and the same payload as the RingoLeads block above,
+        // sent to the SAME address (RMFL_RINGOONE_URL is RingoLeads' own endpoint; Ringo
+        // One's lead intake is that address). Uses each location's own Ringo One key if
+        // set, otherwise falls back to that location's RingoLeads key. Do not enable Ringo
+        // One alongside RingoLeads on the same site while they share a key: every lead
+        // would be submitted twice to the identical endpoint with the identical key. PBX
+        // and Repair Desk deliveries are untouched.
         if ($ringoone_enabled && $apiName === 'RingoLeads') {
             $prior_status = isset($status) ? $status : null;
             $ringoone_url = apply_filters('rmfl_ringoone_url', get_option('ringoone_url', '') ?: RMFL_RINGOONE_URL);
@@ -281,7 +286,7 @@ final class RMFL
 
             $response = wp_remote_post($ringoone_url, [
                 'headers' => [
-                    'Authorization' => 'Bearer ' . $current_rl_key,
+                    'Authorization' => 'Bearer ' . $current_ringoone_key,
                     'Content-Type'  => 'application/json',
                 ],
                 'body' => wp_json_encode($ringoone_data),

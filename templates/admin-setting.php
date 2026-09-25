@@ -28,35 +28,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit'])) {
     check_admin_referer('form_plugins_options_group-options');
 
     // Build the dynamic location list (each location has its own PBX key and Repair Desk key)
-    $posted_pbx_keys = isset($_POST['location_pbx_key']) && is_array($_POST['location_pbx_key']) ? $_POST['location_pbx_key'] : [];
-    $posted_rd_keys  = isset($_POST['location_rd_key']) && is_array($_POST['location_rd_key']) ? $_POST['location_rd_key'] : [];
-    $posted_rl_keys  = isset($_POST['location_rl_key']) && is_array($_POST['location_rl_key']) ? $_POST['location_rl_key'] : [];
-    $posted_labels   = isset($_POST['location_label']) && is_array($_POST['location_label']) ? $_POST['location_label'] : [];
-    $location_count = max(count($posted_pbx_keys), count($posted_rd_keys), count($posted_rl_keys));
+    $posted_pbx_keys      = isset($_POST['location_pbx_key']) && is_array($_POST['location_pbx_key']) ? $_POST['location_pbx_key'] : [];
+    $posted_rd_keys       = isset($_POST['location_rd_key']) && is_array($_POST['location_rd_key']) ? $_POST['location_rd_key'] : [];
+    $posted_rl_keys       = isset($_POST['location_rl_key']) && is_array($_POST['location_rl_key']) ? $_POST['location_rl_key'] : [];
+    $posted_ringoone_keys = isset($_POST['location_ringoone_key']) && is_array($_POST['location_ringoone_key']) ? $_POST['location_ringoone_key'] : [];
+    $posted_labels        = isset($_POST['location_label']) && is_array($_POST['location_label']) ? $_POST['location_label'] : [];
+    $location_count = max(count($posted_pbx_keys), count($posted_rd_keys), count($posted_rl_keys), count($posted_ringoone_keys));
 
     $locations_to_save = [];
     for ($i = 0; $i < $location_count; $i++) {
         $locations_to_save[] = [
-            'pbx'   => sanitize_text_field($posted_pbx_keys[$i] ?? ''),
-            'rd'    => sanitize_text_field($posted_rd_keys[$i] ?? ''),
-            'rl'    => sanitize_text_field($posted_rl_keys[$i] ?? ''),
-            'label' => sanitize_text_field($posted_labels[$i] ?? ''),
+            'pbx'      => sanitize_text_field($posted_pbx_keys[$i] ?? ''),
+            'rd'       => sanitize_text_field($posted_rd_keys[$i] ?? ''),
+            'rl'       => sanitize_text_field($posted_rl_keys[$i] ?? ''),
+            'ringoone' => sanitize_text_field($posted_ringoone_keys[$i] ?? ''),
+            'label'    => sanitize_text_field($posted_labels[$i] ?? ''),
         ];
     }
     // Always keep at least one (possibly empty) location
     if (empty($locations_to_save)) {
-        $locations_to_save[] = ['pbx' => '', 'rd' => '', 'rl' => '', 'label' => ''];
+        $locations_to_save[] = ['pbx' => '', 'rd' => '', 'rl' => '', 'ringoone' => '', 'label' => ''];
     }
 
     // Each location must use its own API key, otherwise leads would get routed to the wrong place
-    $duplicate_pbx = rmfl_find_duplicate_values(wp_list_pluck($locations_to_save, 'pbx'));
-    $duplicate_rd  = rmfl_find_duplicate_values(wp_list_pluck($locations_to_save, 'rd'));
-    $duplicate_rl  = rmfl_find_duplicate_values(wp_list_pluck($locations_to_save, 'rl'));
-    if (!empty($duplicate_pbx) || !empty($duplicate_rd) || !empty($duplicate_rl)) {
+    $duplicate_pbx      = rmfl_find_duplicate_values(wp_list_pluck($locations_to_save, 'pbx'));
+    $duplicate_rd       = rmfl_find_duplicate_values(wp_list_pluck($locations_to_save, 'rd'));
+    $duplicate_rl       = rmfl_find_duplicate_values(wp_list_pluck($locations_to_save, 'rl'));
+    $duplicate_ringoone = rmfl_find_duplicate_values(wp_list_pluck($locations_to_save, 'ringoone'));
+    if (!empty($duplicate_pbx) || !empty($duplicate_rd) || !empty($duplicate_rl) || !empty($duplicate_ringoone)) {
         $kinds = [];
         if (!empty($duplicate_pbx)) $kinds[] = 'PBX API key';
         if (!empty($duplicate_rd)) $kinds[] = 'Repair Desk API key';
         if (!empty($duplicate_rl)) $kinds[] = 'RingoLeads API key';
+        if (!empty($duplicate_ringoone)) $kinds[] = 'Ringo One API key';
         $validation_error = 'Each location must use a unique ' . implode(' and ', $kinds) . '. The same key is used by more than one location below, so settings were not saved.';
         // Keep what was submitted so the user can see and fix it, instead of reverting to the saved values
         $locations = $locations_to_save;
@@ -133,9 +137,9 @@ if ($validation_error) {
         $legacy_pbx_2 = get_option('pbx_api_key_2', '');
         $legacy_rd_2  = get_option('repair_desk_api_key_2', '');
 
-        $locations = [['pbx' => $legacy_pbx_1, 'rd' => $legacy_rd_1, 'rl' => '', 'label' => '']];
+        $locations = [['pbx' => $legacy_pbx_1, 'rd' => $legacy_rd_1, 'rl' => '', 'ringoone' => '', 'label' => '']];
         if ($legacy_pbx_2 !== '' || $legacy_rd_2 !== '') {
-            $locations[] = ['pbx' => $legacy_pbx_2, 'rd' => $legacy_rd_2, 'rl' => '', 'label' => ''];
+            $locations[] = ['pbx' => $legacy_pbx_2, 'rd' => $legacy_rd_2, 'rl' => '', 'ringoone' => '', 'label' => ''];
         }
     }
 }
@@ -179,7 +183,16 @@ function render_ringoleads_referral_dropdown($selected_value = '') {
 }
 
 // Renders a single "Location" card (PBX key + Repair Desk key + RingoLeads key)
-function render_location_block($index, $pbx_value = '', $rd_value = '', $rl_value = '', $label_value = '') {
+// $values: pbx, rd, rl, ringoone, label. $enabled: pbx, rd, rl, ringoone (whether that
+// integration's own toggle is on) -- a location only shows the key fields for the
+// integrations currently enabled, so admins aren't asked for keys they don't need yet.
+function render_location_block($index, $values = [], $enabled = []) {
+    $pbx_value      = $values['pbx'] ?? '';
+    $rd_value       = $values['rd'] ?? '';
+    $rl_value       = $values['rl'] ?? '';
+    $ringoone_value = $values['ringoone'] ?? '';
+    $label_value    = $values['label'] ?? '';
+
     $number = $index + 1;
     $remove_button = $index > 0
         ? '<button type="button" class="remove-location-btn rmfl-icon-btn" title="Remove this location" aria-label="Remove this location"><span class="dashicons dashicons-no-alt"></span></button>'
@@ -199,17 +212,21 @@ function render_location_block($index, $pbx_value = '', $rd_value = '', $rl_valu
             <?php echo $remove_button; ?>
         </div>
         <div class="rmfl-location-fields">
-            <div class="pbx-field rmfl-field">
+            <div class="pbx-field rmfl-field<?php echo empty($enabled['pbx']) ? ' rmfl-field-hidden' : ''; ?>">
                 <label>PBX API key</label>
                 <input type="text" name="location_pbx_key[]" value="<?php echo esc_attr($pbx_value); ?>" placeholder="Paste PBX API key" />
             </div>
-            <div class="rd-field rmfl-field">
+            <div class="rd-field rmfl-field<?php echo empty($enabled['rd']) ? ' rmfl-field-hidden' : ''; ?>">
                 <label>Repair Desk API key</label>
                 <input type="text" name="location_rd_key[]" value="<?php echo esc_attr($rd_value); ?>" placeholder="Paste Repair Desk API key" />
             </div>
-            <div class="rl-field rmfl-field">
+            <div class="rl-field rmfl-field<?php echo empty($enabled['rl']) ? ' rmfl-field-hidden' : ''; ?>">
                 <label>RingoLeads API key</label>
                 <input type="text" name="location_rl_key[]" value="<?php echo esc_attr($rl_value); ?>" placeholder="Paste RingoLeads API key" />
+            </div>
+            <div class="ringoone-field rmfl-field<?php echo empty($enabled['ringoone']) ? ' rmfl-field-hidden' : ''; ?>">
+                <label>Ringo One API key</label>
+                <input type="text" name="location_ringoone_key[]" value="<?php echo esc_attr($ringoone_value); ?>" placeholder="Paste Ringo One API key, or leave blank to reuse the RingoLeads key above" />
             </div>
         </div>
     </div>
@@ -359,6 +376,7 @@ function render_location_block($index, $pbx_value = '', $rd_value = '', $rl_valu
         letter-spacing: .02em;
     }
     .rmfl-field input[type="text"] { width: 100%; }
+    .rmfl-field-hidden { display: none; }
 
     #add_location_btn { display: inline-flex; align-items: center; gap: 6px; line-height: normal; }
     #add_location_btn .dashicons { width: 16px; height: 16px; font-size: 16px; line-height: 16px; }
@@ -457,7 +475,7 @@ function render_location_block($index, $pbx_value = '', $rd_value = '', $rl_valu
                     <span class="rmfl-toggle-slider"></span>
                     <span>Enable RingoLeads</span>
                 </label>
-                <label class="rmfl-toggle" title="Sends the RingoLeads forms (rl_ classes) to Ringo One too, using each location's RingoLeads API key.">
+                <label class="rmfl-toggle" title="Sends the RingoLeads forms (rl_ classes) to Ringo One too, using each location's own Ringo One API key if set, otherwise its RingoLeads key.">
                     <input type="checkbox" name="ringoone_enabled" id="ringoone_enabled" value="1" <?php checked($ringoone_enabled, '1'); ?> />
                     <span class="rmfl-toggle-slider"></span>
                     <span>Enable Ringo One</span>
@@ -467,11 +485,25 @@ function render_location_block($index, $pbx_value = '', $rd_value = '', $rl_valu
 
         <div class="rmfl-card">
             <p class="rmfl-card-title"><span class="dashicons dashicons-location"></span> Locations</p>
-            <p class="rmfl-card-subtitle">Each location has its own PBX, Repair Desk, and RingoLeads API key. Location 1 is used by default, add more if you have additional branches.</p>
+            <p class="rmfl-card-subtitle">Each location has its own API key per enabled integration. Location 1 is used by default, add more if you have additional branches.</p>
 
+            <?php
+            $location_toggles = [
+                'pbx'      => $pbx_enabled,
+                'rd'       => $repair_desk_enabled,
+                'rl'       => $ringoleads_enabled,
+                'ringoone' => $ringoone_enabled,
+            ];
+            ?>
             <div id="locationsContainer">
                 <?php foreach ($locations as $i => $loc) {
-                    echo render_location_block($i, $loc['pbx'] ?? '', $loc['rd'] ?? '', $loc['rl'] ?? '', $loc['label'] ?? '');
+                    echo render_location_block($i, [
+                        'pbx'      => $loc['pbx'] ?? '',
+                        'rd'       => $loc['rd'] ?? '',
+                        'rl'       => $loc['rl'] ?? '',
+                        'ringoone' => $loc['ringoone'] ?? '',
+                        'label'    => $loc['label'] ?? '',
+                    ], $location_toggles);
                 } ?>
             </div>
             <button type="button" id="add_location_btn" class="button">
@@ -479,7 +511,7 @@ function render_location_block($index, $pbx_value = '', $rd_value = '', $rl_valu
             </button>
 
             <!-- Hidden template used by JS to add new locations -->
-            <script type="text/template" id="location-template"><?php echo render_location_block(1, '', '', '', ''); ?></script>
+            <script type="text/template" id="location-template"><?php echo render_location_block(1, [], $location_toggles); ?></script>
         </div>
 
         <div class="rmfl-card" id="pbx_referrals_wrap">
@@ -655,6 +687,12 @@ jQuery(document).ready(function ($) {
     $('#add_location_btn').on('click', function () {
         const template = $('#location-template').html();
         const $newBlock = $(template);
+        // The template's field visibility reflects the toggles as of page load; match it
+        // to whatever the admin has live-toggled since, not the stale template state.
+        $newBlock.find('.pbx-field').toggleClass('rmfl-field-hidden', !$('#pbx_enabled').is(':checked'));
+        $newBlock.find('.rd-field').toggleClass('rmfl-field-hidden', !$('#repair_desk_enabled').is(':checked'));
+        $newBlock.find('.rl-field').toggleClass('rmfl-field-hidden', !$('#ringoleads_enabled').is(':checked'));
+        $newBlock.find('.ringoone-field').toggleClass('rmfl-field-hidden', !$('#ringoone_enabled').is(':checked'));
         $('#locationsContainer').append($newBlock);
         renumberLocations();
     });
@@ -664,17 +702,25 @@ jQuery(document).ready(function ($) {
         renumberLocations();
     });
 
-    // Show/Hide API key fields (across all locations) based on the enable checkboxes
+    // Show/Hide API key fields (across all locations, including ones added later) based
+    // on the enable checkboxes, so admins are only asked for keys they currently need.
     $('#pbx_enabled').on('change', function () {
         $('#pbx_referrals_wrap').toggle(this.checked);
+        $('.pbx-field').toggleClass('rmfl-field-hidden', !this.checked);
     }).trigger('change');
 
     $('#repair_desk_enabled').on('change', function () {
         $('#repair_desk_referrals_wrap').toggle(this.checked);
+        $('.rd-field').toggleClass('rmfl-field-hidden', !this.checked);
     }).trigger('change');
 
     $('#ringoleads_enabled').on('change', function () {
         $('#ringoleads_wrap').toggle(this.checked);
+        $('.rl-field').toggleClass('rmfl-field-hidden', !this.checked);
+    }).trigger('change');
+
+    $('#ringoone_enabled').on('change', function () {
+        $('.ringoone-field').toggleClass('rmfl-field-hidden', !this.checked);
     }).trigger('change');
 
     // Referral rows
