@@ -19,6 +19,14 @@ $validation_error = '';
 
 // Handle form submission and save data
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit'])) {
+    // settings_fields('form_plugins_options_group') below already emits a _wpnonce field
+    // tied to this action; verify it here since this handler reads $_POST directly
+    // instead of going through options.php.
+    if (!current_user_can('manage_options')) {
+        wp_die(esc_html__('You are not allowed to change these settings.', 'rm-form-leads'));
+    }
+    check_admin_referer('form_plugins_options_group-options');
+
     // Build the dynamic location list (each location has its own PBX key and Repair Desk key)
     $posted_pbx_keys = isset($_POST['location_pbx_key']) && is_array($_POST['location_pbx_key']) ? $_POST['location_pbx_key'] : [];
     $posted_rd_keys  = isset($_POST['location_rd_key']) && is_array($_POST['location_rd_key']) ? $_POST['location_rd_key'] : [];
