@@ -574,8 +574,8 @@ function render_location_block($index, $values = [], $enabled = []) {
         </div>
 
         <div class="rmfl-card" id="ringoleads_wrap">
-            <p class="rmfl-card-title"><span class="dashicons dashicons-megaphone"></span> RingoLeads source classes</p>
-            <p class="rmfl-card-subtitle">Use one CSS class on the form. The class selects both the RingoLeads source and the location/API key.</p>
+            <p class="rmfl-card-title"><span class="dashicons dashicons-megaphone"></span> Source classes (RingoLeads / Ringo One)</p>
+            <p class="rmfl-card-subtitle">Use one CSS class on the form. The class selects both the lead source and the location/API key, and is used the same way whether the lead goes to RingoLeads, Ringo One, or both.</p>
             <div class="rmfl-referral-hint">
                 Location 1 has no numeric suffix. Location 2 adds <code>_2</code>, Location 3 adds <code>_3</code>, and so on. Example: <code>rl_form_request_google_ads</code> for Location 1 or <code>rl_form_request_google_ads_2</code> for Location 2.
             </div>
@@ -605,7 +605,7 @@ function render_location_block($index, $values = [], $enabled = []) {
             <!-- Hidden template used by JS to add new RingoLeads referral rows -->
             <script type="text/template" id="ringoleads-referral-template"><div class="referral-container"><?php echo render_ringoleads_referral_dropdown(''); ?><button type="button" class="remove-btn" title="Remove">×</button><span class="ringoleads-source-class-display"></span></div></script>
 
-            <p class="rmfl-card-subtitle" style="margin-top:12px;">The current page URL is sent separately as <code>source_url</code>. Custom form fields still pass through to RingoLeads as qualifying answers.</p>
+            <p class="rmfl-card-subtitle" style="margin-top:12px;">The current page URL is sent separately as <code>source_url</code>. Custom form fields still pass through as qualifying answers.</p>
         </div>
 
         <div class="rmfl-card">
@@ -714,12 +714,19 @@ jQuery(document).ready(function ($) {
         $('.rd-field').toggleClass('rmfl-field-hidden', !this.checked);
     }).trigger('change');
 
+    // Ringo One sends the same rl_-class forms as RingoLeads, so the source-class
+    // reference card below is needed whenever either integration is on.
+    function updateSourceClassesVisibility() {
+        $('#ringoleads_wrap').toggle($('#ringoleads_enabled').is(':checked') || $('#ringoone_enabled').is(':checked'));
+    }
+
     $('#ringoleads_enabled').on('change', function () {
-        $('#ringoleads_wrap').toggle(this.checked);
+        updateSourceClassesVisibility();
         $('.rl-field').toggleClass('rmfl-field-hidden', !this.checked);
     }).trigger('change');
 
     $('#ringoone_enabled').on('change', function () {
+        updateSourceClassesVisibility();
         $('.ringoone-field').toggleClass('rmfl-field-hidden', !this.checked);
     }).trigger('change');
 
