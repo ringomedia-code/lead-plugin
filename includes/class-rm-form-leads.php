@@ -355,8 +355,13 @@ final class RMFL
         // version-gated migration in rm-form-leads.php hasn't run here for some reason):
         // $wpdb->insert() fails the WHOLE row, silently, if any one column is unrecognised,
         // which would otherwise drop every new lead instead of just the extra fields data.
-        if ($this->history_table_has_extra_fields_column()) {
+        $column_debug = '';
+        if ($this->history_table_has_extra_fields_column($column_debug)) {
             $data['extra_fields'] = !empty($extra_fields) ? wp_json_encode($extra_fields) : null;
+        }
+        // TEMP DEBUG (2026-09-29): see why extra_fields isn't landing on some sites.
+        if ($column_debug !== '') {
+            $data['response_body'] .= ' | DEBUG column check: ' . $column_debug;
         }
 
         $wpdb->insert($table_name, $data);
@@ -369,9 +374,13 @@ final class RMFL
     // Cached per-request so normal submissions only pay for one extra query. If the
     // column is missing, try to add it (self-heals sites where the version-gated
     // migration in rm-form-leads.php hasn't run) rather than just permanently skipping it.
-    private function history_table_has_extra_fields_column() {
+    // TEMP DEBUG (2026-09-29): $debug is filled in with what actually happened, so a
+    // caller can surface it, since this is otherwise invisible without server log access.
+    private function history_table_has_extra_fields_column(&$debug = '') {
         static $has_column = null;
+        static $cached_debug = '';
         if ($has_column !== null) {
+            $debug = $cached_debug;
             return $has_column;
         }
 
@@ -381,13 +390,23 @@ final class RMFL
             $wpdb->prepare('SHOW COLUMNS FROM ' . $table_name . ' LIKE %s', 'extra_fields')
         );
 
-        if (!$has_column && function_exists('create_api_response_table')) {
-            create_api_response_table();
+        if ($has_column) {
+            $cached_debug = 'column already existed';
+        } else {
+            $before_error = $wpdb->last_error;
+            if (function_exists('create_api_response_table')) {
+                create_api_response_table();
+            }
+            $dbdelta_error = $wpdb->last_error;
             $has_column = (bool) $wpdb->get_var(
                 $wpdb->prepare('SHOW COLUMNS FROM ' . $table_name . ' LIKE %s', 'extra_fields')
             );
+            $cached_debug = $has_column
+                ? 'column was missing, self-heal added it just now'
+                : 'column still missing after self-heal attempt; wpdb->last_error after dbDelta: ' . ($dbdelta_error ?: '(empty)') . '; before: ' . ($before_error ?: '(empty)');
         }
 
+        $debug = $cached_debug;
         return $has_column;
     }
 
