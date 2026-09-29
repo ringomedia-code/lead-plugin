@@ -169,7 +169,7 @@ final class RMFL
                 $message = $body['message'] ?? 'Unknown error';
             }
             $response_body = is_wp_error($response) ? $response->get_error_message() : wp_remote_retrieve_body($response);
-            $this->save_api_response('PBX', $status, $name, $phone, $email, $message, $response_body);
+            $this->save_api_response('PBX', $status, $name, $phone, $email, $lead_message, $response_body, true, $message);
         }
 
         // Handle RepairDesk API request
@@ -204,7 +204,7 @@ final class RMFL
                 $message = $body['message'] ?? 'Unknown error';
             }
             $response_body = is_wp_error($response) ? $response->get_error_message() : wp_remote_retrieve_body($response);
-            $this->save_api_response('Repair Desk', $status, $name, $phone, $email, $message, $response_body);
+            $this->save_api_response('Repair Desk', $status, $name, $phone, $email, $lead_message, $response_body, true, $message);
         }
 
         // Handle RingoLeads inbound lead API request
@@ -252,7 +252,7 @@ final class RMFL
             // failure until we know whether Ringo One delivered the same lead (below), so a
             // working Ringo One doesn't also send a RingoLeads failure email during cutover.
             $defer_ringoleads_email = ($ringoone_enabled && $status === 'error');
-            $this->save_api_response('RingoLeads', $status, $name, $phone, $email, $message, $response_body, !$defer_ringoleads_email);
+            $this->save_api_response('RingoLeads', $status, $name, $phone, $email, $lead_message, $response_body, !$defer_ringoleads_email, $message);
             if ($defer_ringoleads_email) {
                 $ringoleads_pending_message = $message;
                 $ringoleads_pending_response_body = $response_body;
@@ -301,7 +301,7 @@ final class RMFL
                 $ringoone_message = $ringoone_status === 'success' ? 'Lead delivered.' : ($body['error'] ?? 'Unknown error');
             }
             $response_body = is_wp_error($response) ? $response->get_error_message() : wp_remote_retrieve_body($response);
-            $this->save_api_response('Ringo One', $ringoone_status, $name, $phone, $email, $ringoone_message, $response_body);
+            $this->save_api_response('Ringo One', $ringoone_status, $name, $phone, $email, $lead_message, $response_body, true, $ringoone_message);
 
             // Send the RingoLeads failure email deferred above, unless Ringo One just
             // delivered this same lead, in which case there is nothing to alert anyone about.
@@ -325,7 +325,12 @@ final class RMFL
     // Save API response history. $send_email can be set to false to log a failure without
     // emailing it yet, e.g. RingoLeads failures while Ringo One's outcome for the same
     // lead is still pending (see send_form_data_to_api()).
-    public function save_api_response($api_name, $status, $name, $phone, $email, $message, $response_body, $send_email = true) {
+    // $message is the visitor's own lead message, logged as-is in the history table.
+    // $status_detail is the API's status text (e.g. its error reason) used in the admin
+    // alert email instead, since that's more useful there than the visitor's message.
+    // Defaults to $message for callers (like the validation-rejection path) that don't
+    // have a separate status detail to report.
+    public function save_api_response($api_name, $status, $name, $phone, $email, $message, $response_body, $send_email = true, $status_detail = null) {
         global $wpdb;
         $table_name = $wpdb->prefix . 'api_response_history';
 
@@ -340,7 +345,7 @@ final class RMFL
         ]);
 
         if ($status === 'error' && $send_email) {
-            $this->send_error_email($api_name, $name, $phone, $email, $message, $response_body);
+            $this->send_error_email($api_name, $name, $phone, $email, $status_detail ?? $message, $response_body);
         }
     }
 
