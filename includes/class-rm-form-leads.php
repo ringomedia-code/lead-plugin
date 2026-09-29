@@ -89,8 +89,9 @@ final class RMFL
         // Any custom form fields the site sent along (e.g. "service", "timeframe") for
         // pass-through to RingoLeads, which stores unrecognised fields verbatim.
         $extra_fields = [];
-        if (isset($_POST['extra_fields'])) {
-            $decoded_extra = json_decode(wp_unslash($_POST['extra_fields']), true);
+        $extra_fields_raw = isset($_POST['extra_fields']) ? wp_unslash($_POST['extra_fields']) : null;
+        if ($extra_fields_raw !== null) {
+            $decoded_extra = json_decode($extra_fields_raw, true);
             if (is_array($decoded_extra)) {
                 foreach ($decoded_extra as $extra_key => $extra_value) {
                     $clean_key = sanitize_key($extra_key);
@@ -101,6 +102,11 @@ final class RMFL
                 }
             }
         }
+        // TEMP DEBUG (2026-09-29): diagnosing why custom fields (e.g. "company") aren't
+        // showing in the history page's Extra Fields column. Appends exactly what arrived
+        // in $_POST['extra_fields'] to the Response column for RingoLeads/Ringo One rows
+        // so it's visible without server log access. Remove once root-caused.
+        $extra_fields_debug = ' | DEBUG extra_fields raw POST: ' . ($extra_fields_raw === null ? '(not set)' : $extra_fields_raw);
 
         // Require a name plus at least one way to reach back (phone or email); message
         // is optional. sanitize_email() silently empties an invalid address, so log the
@@ -253,7 +259,7 @@ final class RMFL
             // failure until we know whether Ringo One delivered the same lead (below), so a
             // working Ringo One doesn't also send a RingoLeads failure email during cutover.
             $defer_ringoleads_email = ($ringoone_enabled && $status === 'error');
-            $this->save_api_response('RingoLeads', $status, $name, $phone, $email, $lead_message, $response_body, !$defer_ringoleads_email, $message, $extra_fields);
+            $this->save_api_response('RingoLeads', $status, $name, $phone, $email, $lead_message, $response_body . $extra_fields_debug, !$defer_ringoleads_email, $message, $extra_fields);
             if ($defer_ringoleads_email) {
                 $ringoleads_pending_message = $message;
                 $ringoleads_pending_response_body = $response_body;
@@ -302,7 +308,7 @@ final class RMFL
                 $ringoone_message = $ringoone_status === 'success' ? 'Lead delivered.' : ($body['error'] ?? 'Unknown error');
             }
             $response_body = is_wp_error($response) ? $response->get_error_message() : wp_remote_retrieve_body($response);
-            $this->save_api_response('Ringo One', $ringoone_status, $name, $phone, $email, $lead_message, $response_body, true, $ringoone_message, $extra_fields);
+            $this->save_api_response('Ringo One', $ringoone_status, $name, $phone, $email, $lead_message, $response_body . $extra_fields_debug, true, $ringoone_message, $extra_fields);
 
             // Send the RingoLeads failure email deferred above, unless Ringo One just
             // delivered this same lead, in which case there is nothing to alert anyone about.
