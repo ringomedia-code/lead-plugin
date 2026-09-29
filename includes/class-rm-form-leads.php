@@ -335,20 +335,54 @@ final class RMFL
         global $wpdb;
         $table_name = $wpdb->prefix . 'api_response_history';
 
-        $wpdb->insert($table_name, [
+        $data = [
             'api_name' => $api_name,
             'status' => $status,
             'customer_name' => $name,
             'customer_phone' => $phone,
             'customer_email' => $email,
             'message' => $message,
-            'extra_fields' => !empty($extra_fields) ? wp_json_encode($extra_fields) : null,
             'response_body' => $response_body,
-        ]);
+        ];
+
+        // Guard against the extra_fields column not existing yet on this site (e.g. the
+        // version-gated migration in rm-form-leads.php hasn't run here for some reason):
+        // $wpdb->insert() fails the WHOLE row, silently, if any one column is unrecognised,
+        // which would otherwise drop every new lead instead of just the extra fields data.
+        if ($this->history_table_has_extra_fields_column()) {
+            $data['extra_fields'] = !empty($extra_fields) ? wp_json_encode($extra_fields) : null;
+        }
+
+        $wpdb->insert($table_name, $data);
 
         if ($status === 'error' && $send_email) {
             $this->send_error_email($api_name, $name, $phone, $email, $status_detail ?? $message, $response_body);
         }
+    }
+
+    // Cached per-request so normal submissions only pay for one extra query. If the
+    // column is missing, try to add it (self-heals sites where the version-gated
+    // migration in rm-form-leads.php hasn't run) rather than just permanently skipping it.
+    private function history_table_has_extra_fields_column() {
+        static $has_column = null;
+        if ($has_column !== null) {
+            return $has_column;
+        }
+
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'api_response_history';
+        $has_column = (bool) $wpdb->get_var(
+            $wpdb->prepare('SHOW COLUMNS FROM ' . $table_name . ' LIKE %s', 'extra_fields')
+        );
+
+        if (!$has_column && function_exists('create_api_response_table')) {
+            create_api_response_table();
+            $has_column = (bool) $wpdb->get_var(
+                $wpdb->prepare('SHOW COLUMNS FROM ' . $table_name . ' LIKE %s', 'extra_fields')
+            );
+        }
+
+        return $has_column;
     }
 
     // Email error_api_email about a failed delivery. Split out of save_api_response so a
