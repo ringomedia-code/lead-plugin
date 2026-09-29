@@ -109,7 +109,8 @@ final class RMFL
             $raw_email = isset($_POST['email']) ? sanitize_text_field(wp_unslash($_POST['email'])) : '';
             $this->save_api_response(
                 $apiName ?: 'Validation', 'error', $name, $phone, $raw_email, $lead_message,
-                'Rejected by the plugin: a name and a phone or email are required.'
+                'Rejected by the plugin: a name and a phone or email are required.',
+                true, null, $extra_fields
             );
             wp_send_json_error(['message' => 'Required fields are missing.']);
         }
@@ -169,7 +170,7 @@ final class RMFL
                 $message = $body['message'] ?? 'Unknown error';
             }
             $response_body = is_wp_error($response) ? $response->get_error_message() : wp_remote_retrieve_body($response);
-            $this->save_api_response('PBX', $status, $name, $phone, $email, $lead_message, $response_body, true, $message);
+            $this->save_api_response('PBX', $status, $name, $phone, $email, $lead_message, $response_body, true, $message, $extra_fields);
         }
 
         // Handle RepairDesk API request
@@ -204,7 +205,7 @@ final class RMFL
                 $message = $body['message'] ?? 'Unknown error';
             }
             $response_body = is_wp_error($response) ? $response->get_error_message() : wp_remote_retrieve_body($response);
-            $this->save_api_response('Repair Desk', $status, $name, $phone, $email, $lead_message, $response_body, true, $message);
+            $this->save_api_response('Repair Desk', $status, $name, $phone, $email, $lead_message, $response_body, true, $message, $extra_fields);
         }
 
         // Handle RingoLeads inbound lead API request
@@ -252,7 +253,7 @@ final class RMFL
             // failure until we know whether Ringo One delivered the same lead (below), so a
             // working Ringo One doesn't also send a RingoLeads failure email during cutover.
             $defer_ringoleads_email = ($ringoone_enabled && $status === 'error');
-            $this->save_api_response('RingoLeads', $status, $name, $phone, $email, $lead_message, $response_body, !$defer_ringoleads_email, $message);
+            $this->save_api_response('RingoLeads', $status, $name, $phone, $email, $lead_message, $response_body, !$defer_ringoleads_email, $message, $extra_fields);
             if ($defer_ringoleads_email) {
                 $ringoleads_pending_message = $message;
                 $ringoleads_pending_response_body = $response_body;
@@ -301,7 +302,7 @@ final class RMFL
                 $ringoone_message = $ringoone_status === 'success' ? 'Lead delivered.' : ($body['error'] ?? 'Unknown error');
             }
             $response_body = is_wp_error($response) ? $response->get_error_message() : wp_remote_retrieve_body($response);
-            $this->save_api_response('Ringo One', $ringoone_status, $name, $phone, $email, $lead_message, $response_body, true, $ringoone_message);
+            $this->save_api_response('Ringo One', $ringoone_status, $name, $phone, $email, $lead_message, $response_body, true, $ringoone_message, $extra_fields);
 
             // Send the RingoLeads failure email deferred above, unless Ringo One just
             // delivered this same lead, in which case there is nothing to alert anyone about.
@@ -330,7 +331,7 @@ final class RMFL
     // alert email instead, since that's more useful there than the visitor's message.
     // Defaults to $message for callers (like the validation-rejection path) that don't
     // have a separate status detail to report.
-    public function save_api_response($api_name, $status, $name, $phone, $email, $message, $response_body, $send_email = true, $status_detail = null) {
+    public function save_api_response($api_name, $status, $name, $phone, $email, $message, $response_body, $send_email = true, $status_detail = null, $extra_fields = []) {
         global $wpdb;
         $table_name = $wpdb->prefix . 'api_response_history';
 
@@ -341,6 +342,7 @@ final class RMFL
             'customer_phone' => $phone,
             'customer_email' => $email,
             'message' => $message,
+            'extra_fields' => !empty($extra_fields) ? wp_json_encode($extra_fields) : null,
             'response_body' => $response_body,
         ]);
 

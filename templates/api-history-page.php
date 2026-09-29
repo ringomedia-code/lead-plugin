@@ -67,6 +67,7 @@ $results = $wpdb->get_results("SELECT * FROM $table_name ORDER BY created_at DES
                     <th>Phone</th>
                     <th>Email</th>
                     <th>Message</th>
+                    <th>Extra Fields</th>
                     <th>Response</th>
                     <th style="width:150px;">Timestamp</th>
                 </tr>
@@ -86,6 +87,18 @@ $results = $wpdb->get_results("SELECT * FROM $table_name ORDER BY created_at DES
                         <td><?php echo esc_html($row['customer_phone']); ?></td>
                         <td><?php echo esc_html($row['customer_email']); ?></td>
                         <td><?php echo esc_html($row['message']); ?></td>
+                        <td>
+                            <?php
+                            $extra_fields = json_decode($row['extra_fields'] ?? '', true);
+                            if (is_array($extra_fields) && !empty($extra_fields)) {
+                                $pairs = [];
+                                foreach ($extra_fields as $field_key => $field_value) {
+                                    $pairs[] = esc_html($field_key) . ': ' . esc_html($field_value);
+                                }
+                                echo implode('<br>', $pairs);
+                            }
+                            ?>
+                        </td>
                         <td><span class="rmfl-response-cell"><?php echo esc_html($row['response_body']); ?></span></td>
                         <td><?php echo esc_html($row['created_at']); ?></td>
                     </tr>

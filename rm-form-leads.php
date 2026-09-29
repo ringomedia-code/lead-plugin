@@ -10,7 +10,7 @@
 Plugin Name: RM Form Leads
 Plugin URI: 
 Description: Collect and manage form leads effortlessly, with support for routing leads from any number of business locations.
-Version: 1.7.5
+Version: 1.7.6
 Author: Ringo Media
 Author URI: https://ringomedia.com
 License: GPLv2 or later
@@ -23,7 +23,7 @@ if (!defined('RMFL_PLUGIN_PATH')) define('RMFL_PLUGIN_PATH', plugin_dir_path(__F
 if (!defined('RMFL_PLUGIN_URI')) define('RMFL_PLUGIN_URI', plugins_url('/', __FILE__));
 if (!defined('RMFL_PLUGIN_INC')) define('RMFL_PLUGIN_INC', RMFL_PLUGIN_PATH . 'includes/');
 if (!defined('RMFL_PLUGIN_TEMP')) define('RMFL_PLUGIN_TEMP', RMFL_PLUGIN_PATH . 'templates/');
-define('RMFL_PLUGIN_VERSION', '1.7.5');
+define('RMFL_PLUGIN_VERSION', '1.7.6');
 // Ringo One's own lead intake endpoint: same contract as RingoLeads (same fields),
 // but its own address and its own per-location key. Overridable with the
 // `ringoone_url` option or the `rmfl_ringoone_url` filter.
@@ -63,6 +63,7 @@ function create_api_response_table() {
         customer_phone VARCHAR(20),
         customer_email VARCHAR(255),
         message TEXT NOT NULL,
+        extra_fields TEXT,
         response_body TEXT NOT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     ) $charset_collate;";
@@ -71,6 +72,16 @@ function create_api_response_table() {
     dbDelta($sql);
 }
 register_activation_hook(__FILE__, 'create_api_response_table');
+
+// Forced auto-updates (see below) mean sites go from an old version straight to a new one
+// without deactivating/reactivating, so register_activation_hook alone won't add columns
+// like extra_fields to an already-existing table. Re-run dbDelta once per version bump.
+add_action('plugins_loaded', function() {
+    if (get_option('rmfl_db_version') !== RMFL_PLUGIN_VERSION) {
+        create_api_response_table();
+        update_option('rmfl_db_version', RMFL_PLUGIN_VERSION);
+    }
+});
 
 add_action('admin_init', function() {
     delete_site_transient('update_plugins');
