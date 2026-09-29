@@ -97,6 +97,11 @@ final class RMFL
                     if ($clean_key === '' || !is_scalar($extra_value)) {
                         continue;
                     }
+                    // Anti-spam/verification plumbing (honeypot traps, captcha tokens), not
+                    // lead data - noisy and meaningless in the history page, so drop them.
+                    if (strpos($clean_key, 'honeypot') !== false || strpos($clean_key, 'captcha') !== false) {
+                        continue;
+                    }
                     $extra_fields[$clean_key] = sanitize_text_field($extra_value);
                 }
             }
