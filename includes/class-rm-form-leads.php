@@ -89,9 +89,8 @@ final class RMFL
         // Any custom form fields the site sent along (e.g. "service", "timeframe") for
         // pass-through to RingoLeads, which stores unrecognised fields verbatim.
         $extra_fields = [];
-        $extra_fields_raw = isset($_POST['extra_fields']) ? wp_unslash($_POST['extra_fields']) : null;
-        if ($extra_fields_raw !== null) {
-            $decoded_extra = json_decode($extra_fields_raw, true);
+        if (isset($_POST['extra_fields'])) {
+            $decoded_extra = json_decode(wp_unslash($_POST['extra_fields']), true);
             if (is_array($decoded_extra)) {
                 foreach ($decoded_extra as $extra_key => $extra_value) {
                     $clean_key = sanitize_key($extra_key);
@@ -102,11 +101,6 @@ final class RMFL
                 }
             }
         }
-        // TEMP DEBUG (2026-09-29): diagnosing why custom fields (e.g. "company") aren't
-        // showing in the history page's Extra Fields column. Appends exactly what arrived
-        // in $_POST['extra_fields'] to the Response column for RingoLeads/Ringo One rows
-        // so it's visible without server log access. Remove once root-caused.
-        $extra_fields_debug = ' | DEBUG extra_fields raw POST: ' . ($extra_fields_raw === null ? '(not set)' : $extra_fields_raw);
 
         // Require a name plus at least one way to reach back (phone or email); message
         // is optional. sanitize_email() silently empties an invalid address, so log the
@@ -259,7 +253,7 @@ final class RMFL
             // failure until we know whether Ringo One delivered the same lead (below), so a
             // working Ringo One doesn't also send a RingoLeads failure email during cutover.
             $defer_ringoleads_email = ($ringoone_enabled && $status === 'error');
-            $this->save_api_response('RingoLeads', $status, $name, $phone, $email, $lead_message, $response_body . $extra_fields_debug, !$defer_ringoleads_email, $message, $extra_fields);
+            $this->save_api_response('RingoLeads', $status, $name, $phone, $email, $lead_message, $response_body, !$defer_ringoleads_email, $message, $extra_fields);
             if ($defer_ringoleads_email) {
                 $ringoleads_pending_message = $message;
                 $ringoleads_pending_response_body = $response_body;
@@ -308,7 +302,7 @@ final class RMFL
                 $ringoone_message = $ringoone_status === 'success' ? 'Lead delivered.' : ($body['error'] ?? 'Unknown error');
             }
             $response_body = is_wp_error($response) ? $response->get_error_message() : wp_remote_retrieve_body($response);
-            $this->save_api_response('Ringo One', $ringoone_status, $name, $phone, $email, $lead_message, $response_body . $extra_fields_debug, true, $ringoone_message, $extra_fields);
+            $this->save_api_response('Ringo One', $ringoone_status, $name, $phone, $email, $lead_message, $response_body, true, $ringoone_message, $extra_fields);
 
             // Send the RingoLeads failure email deferred above, unless Ringo One just
             // delivered this same lead, in which case there is nothing to alert anyone about.
@@ -355,13 +349,8 @@ final class RMFL
         // version-gated migration in rm-form-leads.php hasn't run here for some reason):
         // $wpdb->insert() fails the WHOLE row, silently, if any one column is unrecognised,
         // which would otherwise drop every new lead instead of just the extra fields data.
-        $column_debug = '';
-        if ($this->history_table_has_extra_fields_column($column_debug)) {
+        if ($this->history_table_has_extra_fields_column()) {
             $data['extra_fields'] = !empty($extra_fields) ? wp_json_encode($extra_fields) : null;
-        }
-        // TEMP DEBUG (2026-09-29): see why extra_fields isn't landing on some sites.
-        if ($column_debug !== '') {
-            $data['response_body'] .= ' | DEBUG column check: ' . $column_debug;
         }
 
         $wpdb->insert($table_name, $data);
@@ -374,13 +363,9 @@ final class RMFL
     // Cached per-request so normal submissions only pay for one extra query. If the
     // column is missing, try to add it (self-heals sites where the version-gated
     // migration in rm-form-leads.php hasn't run) rather than just permanently skipping it.
-    // TEMP DEBUG (2026-09-29): $debug is filled in with what actually happened, so a
-    // caller can surface it, since this is otherwise invisible without server log access.
-    private function history_table_has_extra_fields_column(&$debug = '') {
+    private function history_table_has_extra_fields_column() {
         static $has_column = null;
-        static $cached_debug = '';
         if ($has_column !== null) {
-            $debug = $cached_debug;
             return $has_column;
         }
 
@@ -390,23 +375,13 @@ final class RMFL
             $wpdb->prepare('SHOW COLUMNS FROM ' . $table_name . ' LIKE %s', 'extra_fields')
         );
 
-        if ($has_column) {
-            $cached_debug = 'column already existed';
-        } else {
-            $before_error = $wpdb->last_error;
-            if (function_exists('create_api_response_table')) {
-                create_api_response_table();
-            }
-            $dbdelta_error = $wpdb->last_error;
+        if (!$has_column && function_exists('create_api_response_table')) {
+            create_api_response_table();
             $has_column = (bool) $wpdb->get_var(
                 $wpdb->prepare('SHOW COLUMNS FROM ' . $table_name . ' LIKE %s', 'extra_fields')
             );
-            $cached_debug = $has_column
-                ? 'column was missing, self-heal added it just now'
-                : 'column still missing after self-heal attempt; wpdb->last_error after dbDelta: ' . ($dbdelta_error ?: '(empty)') . '; before: ' . ($before_error ?: '(empty)');
         }
 
-        $debug = $cached_debug;
         return $has_column;
     }
 

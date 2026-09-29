@@ -10,7 +10,7 @@
 Plugin Name: RM Form Leads
 Plugin URI: 
 Description: Collect and manage form leads effortlessly, with support for routing leads from any number of business locations.
-Version: 1.7.10
+Version: 1.7.11
 Author: Ringo Media
 Author URI: https://ringomedia.com
 License: GPLv2 or later
@@ -23,7 +23,7 @@ if (!defined('RMFL_PLUGIN_PATH')) define('RMFL_PLUGIN_PATH', plugin_dir_path(__F
 if (!defined('RMFL_PLUGIN_URI')) define('RMFL_PLUGIN_URI', plugins_url('/', __FILE__));
 if (!defined('RMFL_PLUGIN_INC')) define('RMFL_PLUGIN_INC', RMFL_PLUGIN_PATH . 'includes/');
 if (!defined('RMFL_PLUGIN_TEMP')) define('RMFL_PLUGIN_TEMP', RMFL_PLUGIN_PATH . 'templates/');
-define('RMFL_PLUGIN_VERSION', '1.7.10');
+define('RMFL_PLUGIN_VERSION', '1.7.11');
 // Ringo One's own lead intake endpoint: same contract as RingoLeads (same fields),
 // but its own address and its own per-location key. Overridable with the
 // `ringoone_url` option or the `rmfl_ringoone_url` filter.
