@@ -10,7 +10,7 @@
 Plugin Name: RM Form Leads
 Plugin URI: 
 Description: Collect and manage form leads effortlessly, with support for routing leads from any number of business locations.
-Version: 1.7.9
+Version: 1.7.10
 Author: Ringo Media
 Author URI: https://ringomedia.com
 License: GPLv2 or later
@@ -23,7 +23,7 @@ if (!defined('RMFL_PLUGIN_PATH')) define('RMFL_PLUGIN_PATH', plugin_dir_path(__F
 if (!defined('RMFL_PLUGIN_URI')) define('RMFL_PLUGIN_URI', plugins_url('/', __FILE__));
 if (!defined('RMFL_PLUGIN_INC')) define('RMFL_PLUGIN_INC', RMFL_PLUGIN_PATH . 'includes/');
 if (!defined('RMFL_PLUGIN_TEMP')) define('RMFL_PLUGIN_TEMP', RMFL_PLUGIN_PATH . 'templates/');
-define('RMFL_PLUGIN_VERSION', '1.7.9');
+define('RMFL_PLUGIN_VERSION', '1.7.10');
 // Ringo One's own lead intake endpoint: same contract as RingoLeads (same fields),
 // but its own address and its own per-location key. Overridable with the
 // `ringoone_url` option or the `rmfl_ringoone_url` filter.
@@ -55,7 +55,12 @@ function create_api_response_table() {
     $table_name = $wpdb->prefix . 'api_response_history';
     $charset_collate = $wpdb->get_charset_collate();
 
-    $sql = "CREATE TABLE IF NOT EXISTS $table_name (
+    // No "IF NOT EXISTS" here: dbDelta() parses the table name out of the query with
+    // `CREATE TABLE ([^ ]*)`, so "IF NOT EXISTS" gets captured as the table name ("IF"),
+    // which silently breaks its schema-diffing (it never detects/adds new columns like
+    // extra_fields on an existing table). dbDelta is already safe to call on a table that
+    // exists; it only issues ALTER statements for columns actually missing.
+    $sql = "CREATE TABLE $table_name (
         id INT AUTO_INCREMENT PRIMARY KEY,
         api_name VARCHAR(255) NOT NULL,
         status VARCHAR(255) NOT NULL,
