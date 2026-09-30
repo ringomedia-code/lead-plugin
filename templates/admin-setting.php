@@ -169,6 +169,7 @@ function rmfl_ringoleads_sources() {
         'sms'          => 'SMS',
         'ai'           => 'AI',
         'zapier'       => 'Zapier',
+        'email_ads'    => 'Email Ads',
     ];
 }
 
