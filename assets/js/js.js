@@ -54,6 +54,96 @@ jQuery(document).ready(function ($) {
         });
         return route;
     }
+    // Gravity Forms forms are recognized by their standard markup (<form id="gform_N">
+    // plus a hidden is_submit_N input), independent of whatever custom CSS class
+    // (e.g. rl_form_request_website) the site admin added for RingoLeads routing.
+    function isGravityForm($form) {
+        const id = $form.attr('id') || '';
+        if (/^gform_\d+$/.test(id)) return true;
+        return $form.find('input[name^="is_submit_"]').length > 0;
+    }
+
+    // Gravity Forms fields have no semantic `name` attribute (just input_1, input_2, ...),
+    // unlike Elementor's form_fields[...] convention, so name/email/phone/message/extra
+    // fields have to be identified by field type and label instead.
+    function extractGravityFormsFields($form) {
+        const result = { name: '', email: '', phone: '', message: '', extraFields: {}, isBotDetected: false };
+        let nameFirst = '';
+        let nameLast = '';
+
+        $form.find('.gfield').each(function () {
+            const $field = $(this);
+
+            // Gravity Forms' own honeypot field.
+            if ($field.hasClass('gform_validation_container')) {
+                const honeypotVal = $field.find('input, textarea').first().val();
+                if (honeypotVal && honeypotVal.trim() !== '') {
+                    result.isBotDetected = true;
+                }
+                return true;
+            }
+
+            // Composite Name field: Gravity Forms marks the sub-inputs name_first / name_last.
+            const $first = $field.find('.name_first input');
+            const $last = $field.find('.name_last input');
+            if ($first.length || $last.length) {
+                nameFirst = ($first.val() || '').trim();
+                nameLast = ($last.val() || '').trim();
+                return true;
+            }
+
+            const $email = $field.find('input[type="email"]');
+            if ($email.length) {
+                result.email = $email.val() || '';
+                return true;
+            }
+
+            const $phone = $field.find('input[type="tel"]');
+            if ($phone.length) {
+                result.phone = $phone.val() || '';
+                return true;
+            }
+
+            const $textarea = $field.find('textarea');
+            if ($textarea.length) {
+                if (!result.message) {
+                    result.message = $textarea.val() || '';
+                }
+                return true;
+            }
+
+            const $checked = $field.find('input[type="checkbox"]:checked, input[type="radio"]:checked');
+            const $input = $field.find('input, select').not('[type="hidden"], [type="submit"], [type="checkbox"], [type="radio"]').first();
+            if (!$checked.length && !$input.length) return true;
+
+            const label = $field.find('label.gfield_label').first().text().trim();
+            if (!label) return true;
+
+            const slug = label
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, '_')
+                .replace(/^_+|_+$/g, '');
+            if (!slug) return true;
+
+            const value = $checked.length
+                ? $checked.map(function () { return $(this).val(); }).get().join(', ')
+                : ($input.val() || '');
+
+            if (slug === 'name' && !nameFirst && !nameLast) {
+                result.name = value;
+                return true;
+            }
+
+            result.extraFields[slug] = value;
+        });
+
+        if (nameFirst || nameLast) {
+            result.name = [nameFirst, nameLast].filter(Boolean).join(' ');
+        }
+
+        return result;
+    }
+
     // Function to handle form submissions
     function handleFormSubmission(e, formType, routeInfo = null) {
         e.preventDefault(); // Prevent default form submission
@@ -95,95 +185,111 @@ jQuery(document).ready(function ($) {
         // Log which form class was triggered (for debugging)
         console.log(`Form triggered: ${formClassType}`);
 
-        const formData = {};
-        let isBotDetected = false; // Flag to track bot detection
-        $(this).find('input, textarea, select').each(function () {
-            // Check for honeypot fields
-            if ($(this).attr('name') === "form_fields[honeypot_field]" || $(this).attr('name') === "form_fields[honeypot]") {
-                if ($(this).val().trim() !== "") { // Check if the honeypot has a value (bots often fill it)
-                    alert("Our systems detected unusual activity. If you’re human, please avoid hidden fields and try again!");
-                    isBotDetected = true;
-                    window.location.reload(); // Refresh the page
-                    return false; // Exit the `.each()` loop early
+        let name, email, phone, message;
+        let additionalMessage = '';
+        const extraFields = {};
+
+        // Gravity Forms has no form_fields[...] naming convention to key off of, so it needs
+        // its own field-type-based extraction. Elementor (and everything else) keeps using the
+        // existing form_fields[...] bracket parsing below, unchanged.
+        if (formType === 'rl' && isGravityForm($(this))) {
+            const gf = extractGravityFormsFields($(this));
+            if (gf.isBotDetected) {
+                alert("Our systems detected unusual activity. If you’re human, please avoid hidden fields and try again!");
+                window.location.reload();
+                return false;
+            }
+            ({ name, email, phone, message } = gf);
+            Object.assign(extraFields, gf.extraFields);
+        } else {
+            const formData = {};
+            let isBotDetected = false; // Flag to track bot detection
+            $(this).find('input, textarea, select').each(function () {
+                // Check for honeypot fields
+                if ($(this).attr('name') === "form_fields[honeypot_field]" || $(this).attr('name') === "form_fields[honeypot]") {
+                    if ($(this).val().trim() !== "") { // Check if the honeypot has a value (bots often fill it)
+                        alert("Our systems detected unusual activity. If you’re human, please avoid hidden fields and try again!");
+                        isBotDetected = true;
+                        window.location.reload(); // Refresh the page
+                        return false; // Exit the `.each()` loop early
+                    }
+                }
+
+                // Skip hidden inputs
+                if ($(this).attr('type') === 'hidden') {
+                    return true; // Continue to next iteration
+                }
+
+                const name = $(this).attr('name');
+                const value = $(this).val();
+
+                // Skip if the name is 'g-recaptcha-response'
+                if (name === 'g-recaptcha-response') {
+                    return true; // Continue to next iteration
+                }
+
+                if (name && !isBotDetected) { // Only proceed if no bot was detected
+                    formData[name] = value;
+                }
+            });
+
+            // Stop form submission if bot is detected
+            if (isBotDetected) {
+                return false; // Prevents the form from submitting
+            }
+
+            // Helper function to clean and format keys
+            const formatKey = (key) => {
+                let formattedKey = key.replace(/^[^\[]*\[/, '');
+                // Remove the closing ']' if it exists
+                formattedKey = formattedKey.replace(/\]$/, '');
+                // Replace underscores and hyphens with spaces
+                formattedKey = formattedKey.replace(/[_-]/g, ' ');
+                // Trim any leading or trailing spaces
+                formattedKey = formattedKey.trim();
+                // Capitalize each word
+                return formattedKey.replace(/\b\w/g, (char) => char.toUpperCase());
+            };
+
+            // Define the specific keys you want to extract
+            const specificKeys = {
+                'form_fields[name]': 'name',
+                'form_fields[email]': 'email',
+                'form_fields[phone]': 'phone',
+                'form_fields[message]': 'message'
+            };
+
+            // Extract specific fields for API
+            const extractedFields = {};
+            for (const key in specificKeys) {
+                if (formData[key]) {
+                    extractedFields[specificKeys[key]] = formData[key];
+                } else {
+                    extractedFields[specificKeys[key]] = ''; // Default to empty string if not found
                 }
             }
 
-            // Skip hidden inputs
-            if ($(this).attr('type') === 'hidden') {
-                return true; // Continue to next iteration
-            }
+            ({ name, email, phone, message } = extractedFields);
 
-            const name = $(this).attr('name');
-            const value = $(this).val();
+            // Pulls the plain field name out of a "form_fields[service]" style key,
+            // e.g. "form_fields[service]" -> "service".
+            const extractFieldKey = (key) => {
+                const match = key.match(/^[^\[]*\[(.+)\]$/);
+                return match ? match[1] : key;
+            };
 
-            // Skip if the name is 'g-recaptcha-response'
-            if (name === 'g-recaptcha-response') {
-                return true; // Continue to next iteration
-            }
-
-            if (name && !isBotDetected) { // Only proceed if no bot was detected
-                formData[name] = value;
-            }
-        });
-
-        // Stop form submission if bot is detected
-        if (isBotDetected) {
-            return false; // Prevents the form from submitting
-        }
-
-        // Helper function to clean and format keys
-        const formatKey = (key) => {
-            let formattedKey = key.replace(/^[^\[]*\[/, '');
-            // Remove the closing ']' if it exists
-            formattedKey = formattedKey.replace(/\]$/, '');
-            // Replace underscores and hyphens with spaces
-            formattedKey = formattedKey.replace(/[_-]/g, ' ');
-            // Trim any leading or trailing spaces
-            formattedKey = formattedKey.trim();
-            // Capitalize each word
-            return formattedKey.replace(/\b\w/g, (char) => char.toUpperCase());
-        };
-
-        // Define the specific keys you want to extract
-        const specificKeys = {
-            'form_fields[name]': 'name',
-            'form_fields[email]': 'email',
-            'form_fields[phone]': 'phone',
-            'form_fields[message]': 'message'
-        };
-
-        // Extract specific fields for API
-        const extractedFields = {};
-        for (const key in specificKeys) {
-            if (formData[key]) {
-                extractedFields[specificKeys[key]] = formData[key];
-            } else {
-                extractedFields[specificKeys[key]] = ''; // Default to empty string if not found
-            }
-        }
-
-        const { name, email, phone, message } = extractedFields;
-
-        // Pulls the plain field name out of a "form_fields[service]" style key,
-        // e.g. "form_fields[service]" -> "service".
-        const extractFieldKey = (key) => {
-            const match = key.match(/^[^\[]*\[(.+)\]$/);
-            return match ? match[1] : key;
-        };
-
-        // Handle additional (custom) fields. RingoLeads stores unrecognised fields
-        // verbatim, so those get sent through as their own keys instead of being
-        // folded into the message text like PBX and Repair Desk expect.
-        let additionalMessage = '';
-        const extraFields = {};
-        for (const key in formData) {
-            if (!specificKeys[key]) { // If the key is not in the specificKeys map
-                if (formType === 'rl') {
-                    const fieldKey = extractFieldKey(key);
-                    if (fieldKey) extraFields[fieldKey] = formData[key];
-                } else {
-                    const formattedKey = formatKey(key); // Format the key
-                    additionalMessage += `\n${formattedKey}: ${formData[key]}`;
+            // Handle additional (custom) fields. RingoLeads stores unrecognised fields
+            // verbatim, so those get sent through as their own keys instead of being
+            // folded into the message text like PBX and Repair Desk expect.
+            for (const key in formData) {
+                if (!specificKeys[key]) { // If the key is not in the specificKeys map
+                    if (formType === 'rl') {
+                        const fieldKey = extractFieldKey(key);
+                        if (fieldKey) extraFields[fieldKey] = formData[key];
+                    } else {
+                        const formattedKey = formatKey(key); // Format the key
+                        additionalMessage += `\n${formattedKey}: ${formData[key]}`;
+                    }
                 }
             }
         }
