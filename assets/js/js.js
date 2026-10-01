@@ -129,7 +129,19 @@ jQuery(document).ready(function ($) {
                 ? $checked.map(function () { return $(this).val(); }).get().join(', ')
                 : ($input.val() || '');
 
-            if (slug === 'name' && !nameFirst && !nameLast) {
+            // Covers forms that use two plain text fields labeled "First Name" /
+            // "Last Name" instead of Gravity Forms' composite Name field type.
+            if (/(^|_)first_?name$/.test(slug) || slug === 'first') {
+                nameFirst = value;
+                return true;
+            }
+            if (/(^|_)last_?name$/.test(slug) || slug === 'last') {
+                nameLast = value;
+                return true;
+            }
+
+            // Covers a single field labeled "Name", "Full Name", "Your Name", etc.
+            if (!result.name && (slug === 'name' || /_name$/.test(slug))) {
                 result.name = value;
                 return true;
             }
@@ -137,7 +149,7 @@ jQuery(document).ready(function ($) {
             result.extraFields[slug] = value;
         });
 
-        if (nameFirst || nameLast) {
+        if (!result.name && (nameFirst || nameLast)) {
             result.name = [nameFirst, nameLast].filter(Boolean).join(' ');
         }
 
