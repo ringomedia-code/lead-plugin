@@ -164,7 +164,16 @@ jQuery(document).ready(function ($) {
 
     // Function to handle form submissions
     function handleFormSubmission(e, formType, routeInfo = null) {
-        e.preventDefault(); // Prevent default form submission
+        // Gravity Forms' own AJAX mode submits the form natively into a hidden iframe —
+        // that native submission is what resolves its "processing" spinner and swaps in
+        // the confirmation screen. Calling preventDefault() would block that submission
+        // entirely, leaving the form stuck on "processing" forever. For Gravity Forms we
+        // only piggyback an extra AJAX call to relay the lead; we never own navigation
+        // for these forms the way we do for PBX/RepairDesk/Elementor forms.
+        const isGF = formType === 'rl' && isGravityForm($(this));
+        if (!isGF) {
+            e.preventDefault(); // Prevent default form submission
+        }
 
         // Base class prefix for PBX / RepairDesk. RingoLeads routing is handled
         // separately because one class now carries BOTH source and location.
@@ -210,9 +219,10 @@ jQuery(document).ready(function ($) {
         // Gravity Forms has no form_fields[...] naming convention to key off of, so it needs
         // its own field-type-based extraction. Elementor (and everything else) keeps using the
         // existing form_fields[...] bracket parsing below, unchanged.
-        if (formType === 'rl' && isGravityForm($(this))) {
+        if (isGF) {
             const gf = extractGravityFormsFields($(this));
             if (gf.isBotDetected) {
+                e.preventDefault(); // Block the native GF submission too; we skipped it above.
                 alert("Our systems detected unusual activity. If you’re human, please avoid hidden fields and try again!");
                 window.location.reload();
                 return false;
