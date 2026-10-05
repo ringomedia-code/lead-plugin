@@ -116,7 +116,13 @@ jQuery(document).ready(function ($) {
             const $input = $field.find('input, select').not('[type="hidden"], [type="submit"], [type="checkbox"], [type="radio"]').first();
             if (!$checked.length && !$input.length) return true;
 
-            const label = $field.find('label.gfield_label').first().text().trim();
+            // Strip Gravity Forms' required-field indicator (e.g. "(Required)" or "*")
+            // before reading the label text, otherwise "Full Name (Required)" slugifies
+            // to "full_name_required" and fails the name-field detection patterns below.
+            const $labelEl = $field.find('label.gfield_label').first();
+            const label = $labelEl.length
+                ? $labelEl.clone().find('.gfield_required').remove().end().text().trim()
+                : '';
             if (!label) return true;
 
             const slug = label
