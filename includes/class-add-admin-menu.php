@@ -3,8 +3,8 @@
 function rm_form_leads_menu_page()
 {
     add_menu_page(
-        __('RM Form Leads', 'RMFormLeads'),
-        'RM Form Leads',
+        __('Ringo One', 'RMFormLeads'),
+        'Ringo One',
         'manage_options',
         'rm-form-leads',
         'rmfl_menu_func',
