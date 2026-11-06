@@ -89,6 +89,7 @@ final class RMFL
         // Any custom form fields the site sent along (e.g. "service", "timeframe") for
         // pass-through to RingoLeads, which stores unrecognised fields verbatim.
         $extra_fields = [];
+        $trap_field_filled = false;
         if (isset($_POST['extra_fields'])) {
             $decoded_extra = json_decode(wp_unslash($_POST['extra_fields']), true);
             if (is_array($decoded_extra)) {
@@ -100,11 +101,31 @@ final class RMFL
                     // Anti-spam/verification plumbing (honeypot traps, captcha tokens), not
                     // lead data - noisy and meaningless in the history page, so drop them.
                     if (strpos($clean_key, 'honeypot') !== false || strpos($clean_key, 'captcha') !== false) {
+                        // A bot that posts directly (skipping the browser JS that normally
+                        // blocks this) can still fill the trap - catch it here instead of
+                        // just silently dropping the field, which let every such bot
+                        // through as a "real" lead.
+                        if (trim((string) $extra_value) !== '') {
+                            $trap_field_filled = true;
+                        }
                         continue;
                     }
                     $extra_fields[$clean_key] = sanitize_text_field($extra_value);
                 }
             }
+        }
+
+        // Reject outright when the honeypot trap was filled in - this is the server-side
+        // backstop for bots that skip the form's own JS validation entirely and POST
+        // straight to admin-ajax.php.
+        if ($trap_field_filled) {
+            $raw_email = isset($_POST['email']) ? sanitize_text_field(wp_unslash($_POST['email'])) : '';
+            $this->save_api_response(
+                $apiName ?: 'Validation', 'error', $name, $phone, $raw_email, $lead_message,
+                'Rejected by the plugin: honeypot field was filled in (likely a bot).',
+                true, null, $extra_fields
+            );
+            wp_send_json_error(['message' => 'Submission rejected.']);
         }
 
         // Require a name plus at least one way to reach back (phone or email); message
