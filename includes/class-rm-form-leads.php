@@ -90,6 +90,11 @@ final class RMFL
         // pass-through to RingoLeads, which stores unrecognised fields verbatim.
         $extra_fields = [];
         $trap_field_filled = false;
+        // Captures the raw hCaptcha/reCAPTCHA token when the form included one, so it can
+        // be verified below. null = no captcha field was submitted at all (site/form has
+        // no captcha configured - nothing to verify). '' or a string = field was present
+        // and needs checking against the provider.
+        $captcha_token = null;
         if (isset($_POST['extra_fields'])) {
             $decoded_extra = json_decode(wp_unslash($_POST['extra_fields']), true);
             if (is_array($decoded_extra)) {
@@ -98,16 +103,23 @@ final class RMFL
                     if ($clean_key === '' || !is_scalar($extra_value)) {
                         continue;
                     }
-                    // Anti-spam/verification plumbing (honeypot traps, captcha tokens), not
-                    // lead data - noisy and meaningless in the history page, so drop them.
-                    if (strpos($clean_key, 'honeypot') !== false || strpos($clean_key, 'captcha') !== false) {
-                        // A bot that posts directly (skipping the browser JS that normally
-                        // blocks this) can still fill the trap - catch it here instead of
-                        // just silently dropping the field, which let every such bot
-                        // through as a "real" lead.
+                    // Honeypot trap: humans never see this field, so any value in it
+                    // means a bot filled it blind. A bot that posts directly (skipping
+                    // the browser JS that normally blocks this) can still fill the trap -
+                    // catch it here instead of just silently dropping the field, which let
+                    // every such bot through as a "real" lead.
+                    if (strpos($clean_key, 'honeypot') !== false) {
                         if (trim((string) $extra_value) !== '') {
                             $trap_field_filled = true;
                         }
+                        continue;
+                    }
+                    // Captcha token (e.g. hCaptcha's h-captcha-response): unlike the
+                    // honeypot, a real human is SUPPOSED to leave this non-empty, so it
+                    // can't be judged by presence/value here - it has to be verified
+                    // against the provider below instead.
+                    if (strpos($clean_key, 'captcha') !== false) {
+                        $captcha_token = trim((string) $extra_value);
                         continue;
                     }
                     $extra_fields[$clean_key] = sanitize_text_field($extra_value);
@@ -115,15 +127,19 @@ final class RMFL
             }
         }
 
-        // Reject outright when the honeypot trap was filled in - this is the server-side
-        // backstop for bots that skip the form's own JS validation entirely and POST
-        // straight to admin-ajax.php.
-        if ($trap_field_filled) {
+        $captcha_failed = $captcha_token !== null && !$this->verify_hcaptcha_token($captcha_token);
+
+        // Reject outright when the honeypot trap was filled in, or a captcha field was
+        // submitted but didn't verify - this is the server-side backstop for bots that
+        // skip the form's own JS validation entirely and POST straight to admin-ajax.php.
+        if ($trap_field_filled || $captcha_failed) {
             $raw_email = isset($_POST['email']) ? sanitize_text_field(wp_unslash($_POST['email'])) : '';
+            $reason = $trap_field_filled
+                ? 'Rejected by the plugin: honeypot field was filled in (likely a bot).'
+                : 'Rejected by the plugin: captcha verification failed (likely a bot).';
             $this->save_api_response(
                 $apiName ?: 'Validation', 'error', $name, $phone, $raw_email, $lead_message,
-                'Rejected by the plugin: honeypot field was filled in (likely a bot).',
-                true, null, $extra_fields
+                $reason, true, null, $extra_fields
             );
             wp_send_json_error(['message' => 'Submission rejected.']);
         }
@@ -347,6 +363,50 @@ final class RMFL
         } else {
             wp_send_json_error(['message' => 'Failed to send data to API.']);
         }
+    }
+
+    // Verifies a captcha token server-side against hCaptcha's siteverify API, using the
+    // secret key the site's own hCaptcha plugin is already configured with (no separate
+    // setup needed per-site). Returns true when there's nothing to check against (no
+    // hCaptcha configured here, or the API is unreachable) - this is anti-spam, not
+    // security, so a transient outage or an unconfigured site shouldn't cost real leads.
+    // Returns false only when hCaptcha explicitly rejects the token.
+    private function verify_hcaptcha_token($token) {
+        $secret = $this->get_hcaptcha_secret_key();
+        if ($secret === '') {
+            return true;
+        }
+        if ($token === '') {
+            return false;
+        }
+
+        $response = wp_remote_post('https://hcaptcha.com/siteverify', [
+            'timeout' => 8,
+            'body' => [
+                'secret' => $secret,
+                'response' => $token,
+                'remoteip' => isset($_SERVER['REMOTE_ADDR']) ? sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR'])) : '',
+            ],
+        ]);
+        if (is_wp_error($response)) {
+            return true;
+        }
+
+        $body = json_decode(wp_remote_retrieve_body($response), true);
+        return !empty($body['success']);
+    }
+
+    // Reads the secret key from the "hCaptcha for WP" plugin's own settings when that
+    // plugin is active on this site, so Ringo One's own captcha check works automatically
+    // wherever that plugin is already configured. Filterable for sites that verify
+    // against a different hCaptcha/reCAPTCHA account than the one stored there.
+    private function get_hcaptcha_secret_key() {
+        $secret = '';
+        $settings = get_option('hcaptcha_settings');
+        if (is_array($settings) && !empty($settings['secret_key'])) {
+            $secret = $settings['secret_key'];
+        }
+        return apply_filters('rmfl_hcaptcha_secret_key', $secret);
     }
 
     // Save API response history. $send_email can be set to false to log a failure without
