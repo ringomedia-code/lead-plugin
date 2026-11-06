@@ -107,8 +107,10 @@ final class RMFL
                     // means a bot filled it blind. A bot that posts directly (skipping
                     // the browser JS that normally blocks this) can still fill the trap -
                     // catch it here instead of just silently dropping the field, which let
-                    // every such bot through as a "real" lead.
-                    if (strpos($clean_key, 'honeypot') !== false) {
+                    // every such bot through as a "real" lead. rm_check_field is a second,
+                    // deliberately unlabeled trap (no "honeypot" in the name) for bots that
+                    // have learned to skip anything obviously named - treated the same way.
+                    if (strpos($clean_key, 'honeypot') !== false || $clean_key === 'rm_check_field') {
                         if (trim((string) $extra_value) !== '') {
                             $trap_field_filled = true;
                         }
